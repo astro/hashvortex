@@ -89,7 +89,8 @@ handle_call({request, Host, Port, Q, As}, From,
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
-handle_info({udp, Sock, IP, Port, Packet}, State = #state{sock = Sock, requests = Requests}) ->
+handle_info({udp, Sock, IP, Port, Packet},
+	    #state{sock = Sock, requests = Requests} = State) ->
     case (catch benc:parse(Packet)) of
 	{'EXIT', Reason} ->
 	    io:format("Received garbage from ~p:~p~n~p", [IP, Port, Reason]);
