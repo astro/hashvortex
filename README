@@ -22,3 +22,11 @@ dht_node:find_node(P, InfoHash).
 
 length(mnesia:dirty_all_keys(node)).
 
+
+%% !!!
+
+Spoofers = ctl:care_about(InfoHash, 16, 10000).
+
+%% ...
+
+ctl:reping(Spoofers, InfoHash).

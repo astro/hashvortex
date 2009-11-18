@@ -3,16 +3,20 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/1, start_link/2, ping/3, find_node/2]).
+-export([start_link/1, start_link/2, ping/3, find_node/2, get_peers/2]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
 	 terminate/2, code_change/3]).
 
 -record(state, {sock, node_id, requests, t = 0}).
--record(request, {t, pkt, caller, last_sent, ntry = 0}).
+-record(request, {t, host, port, resend, caller, last_sent, ntry = 0}).
 
--define(CALL_TIMEOUT, 20000).
+-define(PKT_TIMEOUT, 1000).
+-define(MAX_TRIES, 3).
+
+-define(CALL_TIMEOUT, 40000).
+-define(TICK_INTERVAL, 100).
 
 %%====================================================================
 %% API
@@ -44,6 +48,7 @@ find_node(Pid, InfoHash) ->
 
 find_node1(Ask, InfoHash, Seen) ->
     Nearest = nodes:get_nearest(InfoHash),
+    %% Generate a list of those who are nearest but not Seen yet
     ToAsk = lists:foldl(fun(IpPort, ToAsk) ->
 				case lists:member(IpPort, Seen) of
 				    true -> ToAsk;
@@ -51,11 +56,35 @@ find_node1(Ask, InfoHash, Seen) ->
 				end
 			end, [], Nearest),
     case ToAsk of
-	[] -> Nearest;	     
+	%% Asked all nearest, but no answer
+	[] -> Nearest;
+	%% Further nodes
 	_ ->
 	    util:pmap(Ask, ToAsk),
 	    find_node1(Ask, InfoHash, ToAsk ++ Seen)
     end.
+
+get_peers(Pid, InfoHash) ->
+    Nodes = find_node(Pid, InfoHash),
+    io:format("get_peers: ~p nodes to ask for peers~n", [length(Nodes)]),
+    lists:append(
+      util:pmap(
+	fun({Host, Port}) ->
+		case catch gen_server:call(Pid,
+					   {request, Host, Port,
+					    <<"get_peers">>, [{<<"info_hash">>, InfoHash}]},
+					   ?CALL_TIMEOUT) of
+		    {ok, R} ->
+			case lists:keysearch(<<"values">>, 1, R) of
+			    {value, {_, Values}} ->
+				[{{A, B, C, D}, Port1}
+				 || <<A:8, B:8, C:8, D:8, Port1:16/big>> <- Values];
+			    _ -> []
+			end;
+		    _ -> []
+		end
+	end, Nodes)
+     ).
 
 %%====================================================================
 %% gen_server callbacks
@@ -63,7 +92,7 @@ find_node1(Ask, InfoHash, Seen) ->
 init([NodeId, Port]) ->
     {ok, Sock} = gen_udp:open(Port, [binary, {active, true}]),
     Requests = ets:new(requests, [set, private, {keypos, #request.t}]),
-    {ok, #state{sock = Sock, node_id = NodeId, requests = Requests}}.
+    {ok, #state{sock = Sock, node_id = NodeId, requests = Requests}, ?TICK_INTERVAL}.
 
 handle_call({request, Host, Port, Q}, From, State) ->
     handle_call({request, Host, Port, Q, []}, From, State);
@@ -77,17 +106,23 @@ handle_call({request, Host, Port, Q, As}, From,
 	   {<<"a">>,
 	    [{<<"id">>, NodeId} | As]
 	   }],
+    PktBin = benc:to_binary(Pkt),
+    Send = fun() ->
+		   io:format("Sending to ~p:~p: ~p~n", [Host, Port, Pkt]),
+		   gen_udp:send(Sock, Host, Port, PktBin)
+	   end,
     Request = #request{t = T,
-		       pkt = benc:to_binary(Pkt),
+		       host = Host,
+		       port = Port,
+		       resend = Send,
 		       caller = From,
-		       last_sent = util:mk_timestamp()},
+		       last_sent = util:mk_timestamp_ms()},
     ets:insert(Requests, Request),
-    io:format("Sending to ~p:~p: ~p~n", [Host, Port, Pkt]),
-    gen_udp:send(Sock, Host, Port, Request#request.pkt),
-    {noreply, State#state{t = T2}}.
+    Send(),
+    {noreply, State#state{t = T2}, ?TICK_INTERVAL}.
 
 handle_cast(_Msg, State) ->
-    {noreply, State}.
+    {noreply, State, ?TICK_INTERVAL}.
 
 handle_info({udp, Sock, IP, Port, Packet},
 	    #state{sock = Sock, requests = Requests} = State) ->
@@ -128,10 +163,28 @@ handle_info({udp, Sock, IP, Port, Packet},
 		    ignore
 	    end
     end,
-    {noreply, State};
+    {noreply, State, ?TICK_INTERVAL};
+
+handle_info(timeout, #state{requests = Requests} = State) ->
+    Now = util:mk_timestamp_ms(),
+    TimedOut = ets:foldl(fun(#request{last_sent = LastSent} = Req, L)
+			    when LastSent + ?PKT_TIMEOUT =< Now ->
+				 [Req | L];
+			    (_, L) -> L
+			 end, [], Requests),
+    lists:foreach(fun(#request{caller = Caller, ntry = Ntry} = Req)
+		     when Ntry >= ?MAX_TRIES ->
+			  ets:delete(Requests, Req#request.t),
+			  gen_server:reply(Caller, timeout);
+		     (#request{ntry = Ntry} = Req) ->
+			  ets:insert(Requests, Req#request{ntry = Ntry + 1,
+							   last_sent = Now}),
+			  (Req#request.resend)()
+		  end, TimedOut),
+    {noreply, State, ?TICK_INTERVAL};
 
 handle_info(_Info, State) ->
-    {noreply, State}.
+    {noreply, State, ?TICK_INTERVAL}.
 
 terminate(_Reason, _State) ->
     ok.

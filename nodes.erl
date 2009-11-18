@@ -7,6 +7,8 @@
 	       last_seen,
 	       state = unknown}).
 
+-define(MAX_NEAREST, 32).
+
 init() ->
     mnesia:create_table(node, [{attributes, record_info(fields, node)}]).
 
@@ -19,6 +21,11 @@ seen(IP, Port, NodeId, NewState) ->
 	mnesia:transaction(
 	  fun() ->
 		  case mnesia:read(node, IpPort) of
+		      [#node{} = Node] when NewState == bad ->
+			  %% This is a special case, we've seen this
+			  %% node before but now it has gone bad,
+			  %% replace not so much here
+			  mnesia:write(Node#node{state = bad});
 		      [#node{} = Node] ->
 			  mnesia:write(Node#node{node_id = NodeId,
 						 last_seen = util:mk_timestamp_ms(),
@@ -36,14 +43,16 @@ get_nearest(InfoHash) ->
 	mnesia:transaction(
 	  fun() ->
 		  mnesia:foldl(
-		    fun(Node, Nearest1) ->
+		    fun(#node{state = bad}, Nearest1) ->
+			    Nearest1;
+		       (Node, Nearest1) ->
 			    Nearest2 = [Node | Nearest1],
 			    Nearest3 =
 				lists:sort(fun(#node{node_id = NodeId1},
 					       #node{node_id = NodeId2}) ->
 						   distance(InfoHash, NodeId1) =< distance(InfoHash, NodeId2)
 					   end, Nearest2),
-			    cut(8, Nearest3)
+			    cut(?MAX_NEAREST, Nearest3)
 		    end, [], node)
 	  end),
     [IpPort
