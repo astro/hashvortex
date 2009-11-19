@@ -247,10 +247,9 @@ next_t(T1) ->
     {T, T1 + 1}.
 
 see_r(IP, Port, R) ->
-    case lists:keysearch(<<"id">>, 1, R) of
-	{value, {_, NodeId}} ->
-	    nodes:seen(IP, Port, NodeId);
-	_ -> ignore
+    case dict_get(<<"id">>, R, false) of
+	false -> ignore;
+	NodeId -> nodes:seen(IP, Port, NodeId)
     end.
 
 see_r_nodes(R) ->
