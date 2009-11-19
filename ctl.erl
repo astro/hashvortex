@@ -52,6 +52,7 @@ reping([Node1 | _] = Nodes, InfoHash) ->
 		       util:pmap(fun(Node) ->
 					  catch dht_node:ping(Node, NeighborIP, NeighborPort)
 				  end, Nodes)
-	       end, Neighbors).
+	       end, Neighbors),
+    Nodes.
 
 			  

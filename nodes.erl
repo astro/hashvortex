@@ -14,8 +14,8 @@ init() ->
 
 seen(IP, Port, NodeId) ->
     seen(IP, Port, NodeId, good).
-seen(IP, Port, NodeId, NewState) ->
-    io:format("seen ~p:~p ~p ~p~n", [IP, Port, NewState, NodeId]),
+seen({_, _, _, _} = IP, Port, <<NodeId:160/binary>>, NewState) ->
+    io:format("seen ~p:~p ~p~n", [IP, Port, NewState]),
     IpPort = {IP, Port},
     {atomic, _} =
 	mnesia:transaction(
@@ -36,7 +36,9 @@ seen(IP, Port, NodeId, NewState) ->
 					     last_seen = util:mk_timestamp_ms(),
 					     state = NewState})
 		  end
-	  end).
+	  end);
+seen(_, _, _, _) ->
+    ignored.
 
 get_nearest(InfoHash) ->
     {atomic, Nearest} =

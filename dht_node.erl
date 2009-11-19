@@ -75,11 +75,11 @@ get_peers(Pid, InfoHash) ->
 					    <<"get_peers">>, [{<<"info_hash">>, InfoHash}]},
 					   ?CALL_TIMEOUT) of
 		    {ok, R} ->
-			case lists:keysearch(<<"values">>, 1, R) of
-			    {value, {_, Values}} ->
+			case dict_get(<<"values">>, R, false) of
+			    false -> [];
+			    Values ->
 				[{{A, B, C, D}, Port1}
-				 || <<A:8, B:8, C:8, D:8, Port1:16/big>> <- Values];
-			    _ -> []
+				 || <<A:8, B:8, C:8, D:8, Port1:16/big>> <- Values]
 			end;
 		    _ -> []
 		end
@@ -125,31 +125,65 @@ handle_cast(_Msg, State) ->
     {noreply, State, ?TICK_INTERVAL}.
 
 handle_info({udp, Sock, IP, Port, Packet},
-	    #state{sock = Sock, requests = Requests} = State) ->
+	    #state{sock = Sock, requests = Requests, node_id = NodeId} = State) ->
     case (catch benc:parse(Packet)) of
 	{'EXIT', Reason} ->
 	    io:format("Received garbage from ~p:~p~n~p", [IP, Port, Reason]);
 	Reply ->
 	    io:format("Received from ~p:~p: ~p~n", [IP, Port, Reply]),
+	    T = dict_get(<<"t">>, Reply, <<>>),
 	    Result =
-		case lists:keysearch(<<"y">>, 1, Reply) of
-		    {value, {_, <<"r">>}} ->
-			case lists:keysearch(<<"r">>, 1, Reply) of
-			    {value, {_, R}} ->
+		case dict_get(<<"y">>, Reply, <<>>) of
+		    <<"r">> ->
+			case dict_get(<<"r">>, Reply, false) of
+			    false -> {ok, []};
+			    R ->
 				see_r(IP, Port, R),
 				see_r_nodes(R),
-				{ok, R};
-			    _ -> {ok, []}
+				{ok, R}
 			end;
-		    {value, {_, <<"e">>}} ->
-			case lists:keysearch(<<"e">>, 1, Reply) of
-			    {value, {_, E}} -> {error, E};
-			    _ -> {error, []}
-			end;
+		    <<"e">> ->
+			{error, dict_get(<<"e">>, Reply, [])};
+		    <<"q">> ->
+			Q = dict_get(<<"q">>, Reply, <<>>),
+			As1 = dict_get(<<"a">>, Reply, []),
+			{question, Q, As1};
 		    _ -> {error, []}
 		end,
-	    case lists:keysearch(<<"t">>, 1, Reply) of
-		{value, {_, T}} ->
+	    case Result of
+		{question, <<"ping">>, As2} ->
+		    NodeId1 = dict_get(<<"id">>, As2, <<>>),
+		    nodes:seen(IP, Port, NodeId1, unsure),
+		    Pkt = [{<<"t">>, T},
+			   {<<"y">>, <<"r">>},
+			   {<<"r">>,
+			    [{<<"id">>, NodeId}]
+			   }],
+		    io:format("Sending to ~p:~p: ~p~n", [IP, Port, Pkt]),
+		    gen_udp:send(Sock, IP, Port, benc:to_binary(Pkt));
+		{question, <<"find_node">>, As2} ->
+		    NodeId1 = dict_get(<<"id">>, As2, <<>>),
+		    nodes:seen(IP, Port, NodeId1, unsure),
+		    Target = dict_get(<<"target">>, As2, <<>>),
+		    CompactNodes = list_to_binary(
+				     [ip_port_to_addr(IP1, Port1)
+				      || {IP1, Port1} <- nodes:get_nearest(Target)]),
+		    Pkt = [{<<"t">>, T},
+			   {<<"y">>, <<"r">>},
+			   {<<"r">>,
+			    [{<<"id">>, NodeId},
+			     {<<"nodes">>, CompactNodes}]
+			   }],
+		    io:format("Sending to ~p:~p: ~p~n", [IP, Port, Pkt]),
+		    gen_udp:send(Sock, IP, Port, benc:to_binary(Pkt));
+		{question, _, _} ->
+		    Pkt = [{<<"t">>, T},
+			   {<<"y">>, <<"e">>},
+			   {<<"e">>, [204, <<"I didn't hear you. Lala lala la.">>]
+			   }],
+		    io:format("Sending to ~p:~p: ~p~n", [IP, Port, Pkt]),
+		    gen_udp:send(Sock, IP, Port, benc:to_binary(Pkt));
+		_ ->
 		    case ets:lookup(Requests, T) of
 			[#request{caller = Caller}] ->
 			    ets:delete(Requests, T),
@@ -158,9 +192,7 @@ handle_info({udp, Sock, IP, Port, Packet},
 			    %% Late?
 			    io:format("Unexpected packet from ~p:~p~n", [IP, Port]),
 			    ignore
-		    end;
-		_ ->
-		    ignore
+		    end
 	    end
     end,
     {noreply, State, ?TICK_INTERVAL};
@@ -196,6 +228,12 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%--------------------------------------------------------------------
 
+dict_get(Key, Dict, Default) ->
+    case lists:keysearch(Key, 1, Dict) of
+	{value, {_, Value}} -> Value;
+	_ -> Default
+    end.
+
 generate_node_id() ->
     list_to_binary(
       [random:uniform(256) - 1
@@ -216,13 +254,13 @@ see_r(IP, Port, R) ->
     end.
 
 see_r_nodes(R) ->
-    case lists:keysearch(<<"nodes">>, 1, R) of
-	{value, {_, Nodes}} ->
+    case dict_get(<<"nodes">>, R, false) of
+	false -> ignore;
+	Nodes ->
 	    lists:foreach(fun({Addr, NodeId}) ->
 				  {IP, Port} = addr_to_ip_port(Addr),
 				  nodes:seen(IP, Port, NodeId, unknown)
-			  end, split_contact_nodes(Nodes));
-	_ -> ignore
+			  end, split_contact_nodes(Nodes))
     end.
 
 
