@@ -26,10 +26,14 @@ seen({_, _, _, _} = IP, Port, <<NodeId:20/binary>>, NewState) ->
 			  %% node before but now it has gone bad,
 			  %% replace not so much here
 			  mnesia:write(Node#node{state = bad});
+		      [#node{state = good} = Node] when NewState == unsure ->
+			  mnesia:write(Node#node{node_id = NodeId,
+						 last_seen = util:mk_timestamp_ms(),
+						 state = unsure});
 		      [#node{} = Node] ->
 			  mnesia:write(Node#node{node_id = NodeId,
 						 last_seen = util:mk_timestamp_ms(),
-						 state = NewState});
+						 state = good});
 		      [] ->
 			  mnesia:write(#node{ip_port = IpPort,
 					     node_id = NodeId,

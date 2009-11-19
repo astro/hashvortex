@@ -205,8 +205,11 @@ handle_info(timeout, #state{requests = Requests} = State) ->
 				 [Req | L];
 			    (_, L) -> L
 			 end, [], Requests),
-    lists:foreach(fun(#request{caller = Caller, ntry = Ntry} = Req)
+    lists:foreach(fun(#request{caller = Caller, ntry = Ntry,
+			       host = Host, port = Port} = Req)
 		     when Ntry >= ?MAX_TRIES ->
+			  io:format("Timed out ~p:~p~n",[Host,Port]),
+			  nodes:seen(Host, Port, <<>>, bad),
 			  ets:delete(Requests, Req#request.t),
 			  gen_server:reply(Caller, timeout);
 		     (#request{ntry = Ntry} = Req) ->
@@ -259,7 +262,7 @@ see_r_nodes(R) ->
 	Nodes ->
 	    lists:foreach(fun({Addr, NodeId}) ->
 				  {IP, Port} = addr_to_ip_port(Addr),
-				  nodes:seen(IP, Port, NodeId, unknown)
+				  nodes:seen(IP, Port, NodeId, unsure)
 			  end, split_contact_nodes(Nodes))
     end.
 
