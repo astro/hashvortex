@@ -108,7 +108,7 @@ handle_call({request, Host, Port, Q, As}, From,
 	   }],
     PktBin = benc:to_binary(Pkt),
     Send = fun() ->
-		   io:format("Sending to ~p:~p: ~p~n", [Host, Port, Pkt]),
+		   %%io:format("Sending to ~p:~p: ~p~n", [Host, Port, Pkt]),
 		   gen_udp:send(Sock, Host, Port, PktBin)
 	   end,
     Request = #request{t = T,
@@ -130,7 +130,7 @@ handle_info({udp, Sock, IP, Port, Packet},
 	{'EXIT', Reason} ->
 	    io:format("Received garbage from ~p:~p~n~p", [IP, Port, Reason]);
 	Reply ->
-	    io:format("Received from ~p:~p: ~p~n", [IP, Port, Reply]),
+	    %%io:format("Received from ~p:~p: ~p~n", [IP, Port, Reply]),
 	    T = dict_get(<<"t">>, Reply, <<>>),
 	    Result =
 		case dict_get(<<"y">>, Reply, <<>>) of
@@ -147,6 +147,7 @@ handle_info({udp, Sock, IP, Port, Packet},
 		    <<"q">> ->
 			Q = dict_get(<<"q">>, Reply, <<>>),
 			As1 = dict_get(<<"a">>, Reply, []),
+			io:format("question from ~p:~p: ~p~n", [IP, Port, Q]),
 			{question, Q, As1};
 		    _ -> {error, []}
 		end,
@@ -159,7 +160,7 @@ handle_info({udp, Sock, IP, Port, Packet},
 			   {<<"r">>,
 			    [{<<"id">>, NodeId}]
 			   }],
-		    io:format("Sending to ~p:~p: ~p~n", [IP, Port, Pkt]),
+		    %%io:format("Sending to ~p:~p: ~p~n", [IP, Port, Pkt]),
 		    gen_udp:send(Sock, IP, Port, benc:to_binary(Pkt));
 		{question, <<"find_node">>, As2} ->
 		    NodeId1 = dict_get(<<"id">>, As2, <<>>),
@@ -174,14 +175,14 @@ handle_info({udp, Sock, IP, Port, Packet},
 			    [{<<"id">>, NodeId},
 			     {<<"nodes">>, CompactNodes}]
 			   }],
-		    io:format("Sending to ~p:~p: ~p~n", [IP, Port, Pkt]),
+		    %%io:format("Sending to ~p:~p: ~p~n", [IP, Port, Pkt]),
 		    gen_udp:send(Sock, IP, Port, benc:to_binary(Pkt));
 		{question, _, _} ->
 		    Pkt = [{<<"t">>, T},
 			   {<<"y">>, <<"e">>},
 			   {<<"e">>, [204, <<"I didn't hear you. Lala lala la.">>]
 			   }],
-		    io:format("Sending to ~p:~p: ~p~n", [IP, Port, Pkt]),
+		    %%io:format("Sending to ~p:~p: ~p~n", [IP, Port, Pkt]),
 		    gen_udp:send(Sock, IP, Port, benc:to_binary(Pkt));
 		_ ->
 		    case ets:lookup(Requests, T) of
@@ -190,7 +191,7 @@ handle_info({udp, Sock, IP, Port, Packet},
 			    gen_server:reply(Caller, Result);
 			[] ->
 			    %% Late?
-			    io:format("Unexpected packet from ~p:~p~n", [IP, Port]),
+			    %%io:format("Unexpected packet from ~p:~p~n", [IP, Port]),
 			    ignore
 		    end
 	    end
