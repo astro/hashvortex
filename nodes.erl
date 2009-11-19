@@ -14,7 +14,7 @@ init() ->
 
 seen(IP, Port, NodeId) ->
     seen(IP, Port, NodeId, good).
-seen({_, _, _, _} = IP, Port, <<NodeId:160/binary>>, NewState) ->
+seen({_, _, _, _} = IP, Port, <<NodeId:20/binary>>, NewState) ->
     io:format("seen ~p:~p ~p~n", [IP, Port, NewState]),
     IpPort = {IP, Port},
     {atomic, _} =
