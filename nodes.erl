@@ -5,7 +5,7 @@
 -record(node, {ip_port,
 	       node_id,
 	       last_seen,
-	       state = unknown}).
+	       status = unknown}).
 
 -define(MAX_NEAREST, 32).
 
@@ -14,31 +14,31 @@ init() ->
 
 seen(IP, Port, NodeId) ->
     seen(IP, Port, NodeId, good).
-seen({_, _, _, _} = IP, Port, <<NodeId:20/binary>>, NewState) ->
-    io:format("seen ~p:~p ~p~n", [IP, Port, NewState]),
+seen({_, _, _, _} = IP, Port, <<NodeId:20/binary>>, NewStatus) ->
+    io:format("seen ~p:~p ~p~n", [IP, Port, NewStatus]),
     IpPort = {IP, Port},
     {atomic, _} =
 	mnesia:transaction(
 	  fun() ->
 		  case mnesia:read(node, IpPort) of
-		      [#node{} = Node] when NewState == bad ->
+		      [#node{} = Node] when NewStatus == bad ->
 			  %% This is a special case, we've seen this
 			  %% node before but now it has gone bad,
 			  %% replace not so much here
-			  mnesia:write(Node#node{state = bad});
-		      [#node{state = good} = Node] when NewState == unsure ->
+			  mnesia:write(Node#node{status = bad});
+		      [#node{status = good} = Node] when NewStatus == unsure ->
 			  mnesia:write(Node#node{node_id = NodeId,
 						 last_seen = util:mk_timestamp_ms(),
-						 state = unsure});
+						 status = unsure});
 		      [#node{} = Node] ->
 			  mnesia:write(Node#node{node_id = NodeId,
 						 last_seen = util:mk_timestamp_ms(),
-						 state = good});
+						 status = good});
 		      [] ->
 			  mnesia:write(#node{ip_port = IpPort,
 					     node_id = NodeId,
 					     last_seen = util:mk_timestamp_ms(),
-					     state = NewState})
+					     status = NewStatus})
 		  end
 	  end);
 seen(_, _, _, _) ->
@@ -49,7 +49,7 @@ get_nearest(InfoHash) ->
 	mnesia:transaction(
 	  fun() ->
 		  mnesia:foldl(
-		    fun(#node{state = bad}, Nearest1) ->
+		    fun(#node{status = bad}, Nearest1) ->
 			    Nearest1;
 		       (Node, Nearest1) ->
 			    Nearest2 = [Node | Nearest1],
