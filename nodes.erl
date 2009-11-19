@@ -5,7 +5,7 @@
 -record(node, {ip_port,
 	       node_id,
 	       last_seen,
-	       status = unknown}).
+	       status = unsure}).
 
 -define(MAX_NEAREST, 32).
 
