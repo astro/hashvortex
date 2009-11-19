@@ -8,7 +8,7 @@ nodes:init(),
 
 %% Try to ping the entry node
 
-catch dht_node:ping(P, "router.bittorrent.com", 6881).
+catch dht_node:ping(P, {"router.bittorrent.com",6881}).
 
 %% Get a torrent's info_hash:
 

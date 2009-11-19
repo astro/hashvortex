@@ -3,19 +3,19 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/1, start_link/2, ping/3, find_node/2, get_peers/2]).
+-export([start_link/1, start_link/2, ping/2, find_node/2, get_peers/2]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
 	 terminate/2, code_change/3]).
 
 -record(state, {sock, node_id, requests, t = 0}).
--record(request, {t, host, port, resend, caller, last_sent, ntry = 0}).
+-record(request, {t, addr, resend, caller, last_sent, ntry = 0}).
 
--define(PKT_TIMEOUT, 1000).
+-define(PKT_TIMEOUT, 2000).
 -define(MAX_TRIES, 3).
 
--define(CALL_TIMEOUT, 40000).
+-define(CALL_TIMEOUT, 8000).
 -define(TICK_INTERVAL, 100).
 
 %%====================================================================
@@ -33,13 +33,13 @@ start_link(Port) ->
 start_link(NodeId, Port) ->
     gen_server:start_link(?MODULE, [NodeId, Port], []).
 
-ping(Pid, Host, Port) ->
-    gen_server:call(Pid, {request, Host, Port, <<"ping">>}, ?CALL_TIMEOUT).
+ping(Pid, Addr) ->
+    gen_server:call(Pid, {request, Addr, <<"ping">>}, ?CALL_TIMEOUT).
 
 find_node(Pid, InfoHash) ->
-    Ask = fun({Host1, Port1}) ->
+    Ask = fun(Addr) ->
 		  catch gen_server:call(Pid,
-					{request, Host1, Port1,
+					{request, Addr,
 					 <<"find_node">>, [{<<"target">>, InfoHash}]},
 					?CALL_TIMEOUT)
 	  end,
@@ -48,10 +48,10 @@ find_node(Pid, InfoHash) ->
 find_node1(Ask, InfoHash, Seen) ->
     Nearest = nodes:get_nearest(InfoHash),
     %% Generate a list of those who are nearest but not Seen yet
-    ToAsk = lists:foldl(fun(IpPort, ToAsk) ->
-				case lists:member(IpPort, Seen) of
+    ToAsk = lists:foldl(fun(Addr, ToAsk) ->
+				case lists:member(Addr, Seen) of
 				    true -> ToAsk;
-				    false -> [IpPort | ToAsk]
+				    false -> [Addr | ToAsk]
 				end
 			end, [], Nearest),
     io:format("finde node: ~p seen, ~p to ask~n",[length(Seen), length(ToAsk)]),
@@ -70,17 +70,18 @@ get_peers(Pid, InfoHash) ->
     io:format("get_peers: ~p nodes to ask for peers~n", [length(Nodes)]),
     lists:append(
       util:pmap(
-	fun({Host, Port}) ->
+	fun(Addr) ->
 		case catch gen_server:call(Pid,
-					   {request, Host, Port,
+					   {request, Addr,
 					    <<"get_peers">>, [{<<"info_hash">>, InfoHash}]},
 					   ?CALL_TIMEOUT) of
 		    {ok, R} ->
 			case dict_get(<<"values">>, R, false) of
 			    false -> [];
 			    Values ->
-				[{{A, B, C, D}, Port1}
-				 || <<A:8, B:8, C:8, D:8, Port1:16/big>> <- Values]
+				lists:filter(fun(<<_:6/binary>>) -> true;
+						(_) -> false
+					     end, Values)
 			end;
 		    _ -> []
 		end
@@ -95,11 +96,25 @@ init([NodeId, Port]) ->
     Requests = ets:new(requests, [set, private, {keypos, #request.t}]),
     {ok, #state{sock = Sock, node_id = NodeId, requests = Requests}, ?TICK_INTERVAL}.
 
-handle_call({request, Host, Port, Q}, From, State) ->
-    handle_call({request, Host, Port, Q, []}, From, State);
-handle_call({request, Host, Port, Q, As}, From,
+handle_call({request, Addr, Q}, From, State) ->
+    handle_call({request, Addr, Q, []}, From, State);
+handle_call({request, {Host, Port}, Q, As}, From, State) ->
+    I = self(),
+    spawn_link(fun() ->
+		       case inet:getaddrs(Host, inet) of
+			   {ok, IPs} ->
+			       IP = lists:nth(random:uniform(length(IPs)), IPs),
+			       Addr = ip_port_to_addr(IP, Port),
+			       Result = gen_server:call(I, {request, Addr, Q, As}, ?CALL_TIMEOUT),
+			       gen_server:reply(From, Result);
+			   _ ->
+			       gen_server:reply(From, {error, nxdomain})
+		       end
+	       end),
+    {noreply, State};
+handle_call({request, Addr, Q, As}, From,
 	    #state{sock = Sock, node_id = NodeId, requests = Requests, t = T1} = State) ->
-    io:format("request ~p to ~p:~p~n", [Q, Host, Port]),
+    io:format("request ~p to ~p~n", [Q, Addr]),
     %% {"t":"aa", "y":"q", "q":"ping", "a":{"id":"abcdefghij0123456789"}}
     {T, T2} = next_t(T1),
     Pkt = [{<<"t">>, T},
@@ -109,13 +124,12 @@ handle_call({request, Host, Port, Q, As}, From,
 	    [{<<"id">>, NodeId} | As]
 	   }],
     PktBin = benc:to_binary(Pkt),
+    {IP, Port} = addr_to_ip_port(Addr),
     Send = fun() ->
-		   %%io:format("Sending to ~p:~p: ~p~n", [Host, Port, Pkt]),
-		   gen_udp:send(Sock, Host, Port, PktBin)
+		   gen_udp:send(Sock, IP, Port, PktBin)
 	   end,
     Request = #request{t = T,
-		       host = Host,
-		       port = Port,
+		       addr = Addr,
 		       resend = Send,
 		       caller = From,
 		       last_sent = util:mk_timestamp_ms()},
@@ -128,11 +142,11 @@ handle_cast(_Msg, State) ->
 
 handle_info({udp, Sock, IP, Port, Packet},
 	    #state{sock = Sock, requests = Requests, node_id = NodeId} = State) ->
+    Addr = ip_port_to_addr(IP, Port),
     case (catch benc:parse(Packet)) of
 	{'EXIT', Reason} ->
-	    io:format("Received garbage from ~p:~p~n~p", [IP, Port, Reason]);
+	    io:format("Received garbage from ~p: ~p", [Addr, Reason]);
 	Reply ->
-	    %%io:format("Received from ~p:~p: ~p~n", [IP, Port, Reply]),
 	    T = dict_get(<<"t">>, Reply, <<>>),
 	    Result =
 		case dict_get(<<"y">>, Reply, <<>>) of
@@ -140,7 +154,7 @@ handle_info({udp, Sock, IP, Port, Packet},
 			case dict_get(<<"r">>, Reply, false) of
 			    false -> {ok, []};
 			    R ->
-				see_r(IP, Port, R),
+				see_r(Addr, R),
 				see_r_nodes(R),
 				{ok, R}
 			end;
@@ -149,43 +163,43 @@ handle_info({udp, Sock, IP, Port, Packet},
 		    <<"q">> ->
 			Q = dict_get(<<"q">>, Reply, <<>>),
 			As1 = dict_get(<<"a">>, Reply, []),
-			io:format("question from ~p:~p: ~p~n", [IP, Port, Q]),
+			io:format("question from ~p: ~p~n", [Addr, Q]),
 			{question, Q, As1};
 		    _ -> {error, []}
 		end,
+
 	    case Result of
+
 		{question, <<"ping">>, As2} ->
 		    NodeId1 = dict_get(<<"id">>, As2, <<>>),
-		    nodes:seen(IP, Port, NodeId1, unsure),
+		    nodes:seen(Addr, NodeId1, unsure),
 		    Pkt = [{<<"t">>, T},
 			   {<<"y">>, <<"r">>},
 			   {<<"r">>,
 			    [{<<"id">>, NodeId}]
 			   }],
-		    %%io:format("Sending to ~p:~p: ~p~n", [IP, Port, Pkt]),
 		    gen_udp:send(Sock, IP, Port, benc:to_binary(Pkt));
+
 		{question, <<"find_node">>, As2} ->
 		    NodeId1 = dict_get(<<"id">>, As2, <<>>),
-		    nodes:seen(IP, Port, NodeId1, unsure),
+		    nodes:seen(Addr, NodeId1, unsure),
 		    Target = dict_get(<<"target">>, As2, <<>>),
-		    CompactNodes = list_to_binary(
-				     [ip_port_to_addr(IP1, Port1)
-				      || {IP1, Port1} <- nodes:get_nearest(Target)]),
+		    CompactNodes = list_to_binary(nodes:get_nearest(Target, good)),
 		    Pkt = [{<<"t">>, T},
 			   {<<"y">>, <<"r">>},
 			   {<<"r">>,
 			    [{<<"id">>, NodeId},
 			     {<<"nodes">>, CompactNodes}]
 			   }],
-		    %%io:format("Sending to ~p:~p: ~p~n", [IP, Port, Pkt]),
 		    gen_udp:send(Sock, IP, Port, benc:to_binary(Pkt));
+
 		{question, _, _} ->
 		    Pkt = [{<<"t">>, T},
 			   {<<"y">>, <<"e">>},
 			   {<<"e">>, [204, <<"I didn't hear you. Lala lala la.">>]
 			   }],
-		    %%io:format("Sending to ~p:~p: ~p~n", [IP, Port, Pkt]),
 		    gen_udp:send(Sock, IP, Port, benc:to_binary(Pkt));
+
 		_ ->
 		    case ets:lookup(Requests, T) of
 			[#request{caller = Caller}] ->
@@ -193,32 +207,51 @@ handle_info({udp, Sock, IP, Port, Packet},
 			    gen_server:reply(Caller, Result);
 			[] ->
 			    %% Late?
-			    %%io:format("Unexpected packet from ~p:~p~n", [IP, Port]),
+			    io:format("Unexpected packet from ~p with T=~p~n", [Addr, T]),
 			    ignore
 		    end
+
 	    end
     end,
     {noreply, State, ?TICK_INTERVAL};
 
-handle_info(timeout, #state{requests = Requests} = State) ->
+handle_info(timeout, #state{requests = Requests, node_id = NodeId} = State) ->
     Now = util:mk_timestamp_ms(),
     TimedOut = ets:foldl(fun(#request{last_sent = LastSent} = Req, L)
 			    when LastSent + ?PKT_TIMEOUT =< Now ->
 				 [Req | L];
 			    (_, L) -> L
 			 end, [], Requests),
-    lists:foreach(fun(#request{caller = Caller, ntry = Ntry,
-			       host = Host, port = Port} = Req)
-		     when Ntry >= ?MAX_TRIES ->
-			  io:format("Timed out ~p:~p~n",[Host,Port]),
-			  nodes:seen(Host, Port, <<>>, bad),
-			  ets:delete(Requests, Req#request.t),
-			  gen_server:reply(Caller, timeout);
-		     (#request{ntry = Ntry} = Req) ->
-			  ets:insert(Requests, Req#request{ntry = Ntry + 1,
-							   last_sent = Now}),
-			  (Req#request.resend)()
-		  end, TimedOut),
+    Resends = lists:foldl(
+		fun(#request{caller = Caller, ntry = Ntry,
+			     addr = Addr} = Req, Resends)
+		   when Ntry >= ?MAX_TRIES ->
+			nodes:seen(Addr, <<>>, bad),
+			ets:delete(Requests, Req#request.t),
+			gen_server:reply(Caller, timeout),
+			Resends;
+		   (#request{ntry = Ntry} = Req, Resends) ->
+			ets:insert(Requests, Req#request{ntry = Ntry + 1,
+							 last_sent = Now}),
+			(Req#request.resend)(),
+			Resends + 1
+		end, 0, TimedOut),
+    if
+	Resends > 0 ->
+	    nothing;
+	true ->
+	    lists:foreach(
+	      fun({Addr1, NodeId1}) ->
+		      I = self(),
+		      spawn_link(
+			fun() ->
+				catch gen_server:call(I,
+						      {request, Addr1,
+						       <<"find_node">>, [{<<"target">>, NodeId1}]},
+						      ?CALL_TIMEOUT)
+			end)
+	      end, nodes:neighbors_to_maintain(NodeId, 8))
+    end,
     {noreply, State, ?TICK_INTERVAL};
 
 handle_info(_Info, State) ->
@@ -252,10 +285,10 @@ next_t(T1) ->
     T = <<((T1 bsr 16) band 16#FF):8, (T1 band 16#FF):8>>,
     {T, T1 + 1}.
 
-see_r(IP, Port, R) ->
+see_r(Addr, R) ->
     case dict_get(<<"id">>, R, false) of
 	false -> ignore;
-	NodeId -> nodes:seen(IP, Port, NodeId)
+	NodeId -> nodes:seen(Addr, NodeId)
     end.
 
 see_r_nodes(R) ->
@@ -263,8 +296,7 @@ see_r_nodes(R) ->
 	false -> ignore;
 	Nodes ->
 	    lists:foreach(fun({Addr, NodeId}) ->
-				  {IP, Port} = addr_to_ip_port(Addr),
-				  nodes:seen(IP, Port, NodeId, unsure)
+				  nodes:seen(Addr, NodeId, unsure)
 			  end, split_contact_nodes(Nodes))
     end.
 
