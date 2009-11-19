@@ -38,7 +38,6 @@ ping(Pid, Host, Port) ->
 
 find_node(Pid, InfoHash) ->
     Ask = fun({Host1, Port1}) ->
-		  io:format("Asking ~p:~p~n", [Host1, Port1]),
 		  catch gen_server:call(Pid,
 					{request, Host1, Port1,
 					 <<"find_node">>, [{<<"target">>, InfoHash}]},
@@ -55,6 +54,7 @@ find_node1(Ask, InfoHash, Seen) ->
 				    false -> [IpPort | ToAsk]
 				end
 			end, [], Nearest),
+    io:format("finde node: ~p seen, ~p to ask~n",[length(Seen), length(ToAsk)]),
     case ToAsk of
 	%% Asked all nearest, but no answer
 	[] -> Nearest;
@@ -65,7 +65,8 @@ find_node1(Ask, InfoHash, Seen) ->
     end.
 
 get_peers(Pid, InfoHash) ->
-    Nodes = find_node(Pid, InfoHash),
+    find_node(Pid, InfoHash),
+    Nodes = nodes:get_nearest(InfoHash, good),
     io:format("get_peers: ~p nodes to ask for peers~n", [length(Nodes)]),
     lists:append(
       util:pmap(
@@ -98,6 +99,7 @@ handle_call({request, Host, Port, Q}, From, State) ->
     handle_call({request, Host, Port, Q, []}, From, State);
 handle_call({request, Host, Port, Q, As}, From,
 	    #state{sock = Sock, node_id = NodeId, requests = Requests, t = T1} = State) ->
+    io:format("request ~p to ~p:~p~n", [Q, Host, Port]),
     %% {"t":"aa", "y":"q", "q":"ping", "a":{"id":"abcdefghij0123456789"}}
     {T, T2} = next_t(T1),
     Pkt = [{<<"t">>, T},
