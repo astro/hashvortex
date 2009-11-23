@@ -1,4 +1,4 @@
--module(routes).
+-module(dht_routes).
 
 -export([new/1, insert/3, mark/4, pinged/2, next_action/1]).
 
@@ -41,9 +41,9 @@ insert(Routes, Addr1, NodeId1) ->
 				  false ->
 				      Bucket#bucket{cached_peers = [#peer{addr = Addr1,
 									  node_id = NodeId1} | CachedPeers]};
-				  true -> ignore
+				  true -> Bucket
 			      end;
-			  true -> ignore
+			  true -> Bucket
 		      end
 	      end).
 
@@ -69,7 +69,9 @@ pinged(Routes, NodeId1) ->
     Now = util:mk_timestamp_ms(),
     UpdateFun = fun(#peer{node_id = NodeId2} = Peer)
 		   when NodeId1 == NodeId2 ->
-			Peer#peer{last_ping = Now}
+			Peer#peer{last_ping = Now};
+		   (Peer) ->
+			Peer
 		end,
     bucket_op(Routes, NodeId1,
 	      fun(#bucket{peers = Peers,
@@ -95,15 +97,14 @@ next_action(#routes{buckets = Buckets}) ->
 
 next_action1(#bucket{peers = Peers}) ->
     PeerActions = [#action{time = LastPing + ?PING_INTERVAL,
-			   action = {ping, NodeId}}
-		   || #peer{node_id = NodeId,
+			   action = {ping, NodeId, Addr}}
+		   || #peer{node_id = NodeId, addr = Addr,
 			    last_ping = LastPing} <- Peers],
     CachedPeersActions = if
 			     length(Peers) < ?BUCKET_SIZE ->
 				 [#action{time = LastPing + ?PING_INTERVAL,
 					  action = {ping, NodeId, Addr}}
-				  || #peer{node_id = NodeId,
-					   addr = Addr,
+				  || #peer{node_id = NodeId, addr = Addr,
 					   last_ping = LastPing} <- Peers];
 			     true -> []
 			 end,

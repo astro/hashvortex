@@ -1,9 +1,9 @@
--module(dht_node).
+-module(dht_port).
 
 -behaviour(gen_server).
 
 %% API
--export([start_link/2]).
+-export([start_link/3, ping/2]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -20,8 +20,19 @@
 %%====================================================================
 %% API
 %%====================================================================
-start_link(Port, QuestionCB) ->
-    gen_server:start_link(?MODULE, [Port, QuestionCB], []).
+start_link(NodeId, Port, QuestionCB) ->
+    gen_server:start_link(?MODULE, [NodeId, Port, QuestionCB], []).
+
+ping(Pid, Addr) ->
+io:format("ping ~p ~p~n",[Pid,Addr]),
+    case gen_server:call(Pid, {request, Addr, <<"ping">>}) of
+	{ok, R} ->
+	    case dict_get(<<"id">>, R, false) of
+		<<NodeId:20/binary>> -> {ok, NodeId};
+		_ -> error
+	    end;
+	_ -> error
+    end.
 
 %%====================================================================
 %% gen_server callbacks
@@ -82,7 +93,7 @@ handle_cast({packet, Addr, Pkt}, #state{question_cb = QuestionCB} = State) ->
 			       Q = dict_get(<<"q">>, Pkt, <<>>),
 			       A = dict_get(<<"a">>, Pkt, []),
 			       io:format("question from ~s: ~p~n", [addr:to_s(Addr), Q]),
-			       QuestionCB(Addr, T, Q, A, State)
+			       QuestionCB(Addr, T, Q, A)
 		       end),
 	    next_state(noreply, State);
 	_ ->
@@ -118,6 +129,7 @@ handle_info(timeout, #state{requests = Requests} = State) ->
 	 (#request{ntry = Ntry} = Req) ->
 	      ets:insert(Requests, Req#request{ntry = Ntry + 1,
 					       last_sent = Now}),
+	      io:format("Resending~n"),
 	      (Req#request.resend)()
       end, TimedOut),
     next_state(noreply, State);

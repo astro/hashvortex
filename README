@@ -2,31 +2,13 @@
 %% =====================
 
 %% Start
-mnesia:start(),
-nodes:init(),
 {ok, P} = dht_node:start_link(9999).
 
 %% Try to ping the entry node
 
-catch dht_node:ping(P, {"router.bittorrent.com",6881}).
+dht_node:hint(P, "router.bittorrent.com",6881).
 
 %% Get a torrent's info_hash:
 
 InfoHash = benc:info_hash(benc:parse_file("Nasty.Old.People.2009.XviD.5117424.TPB.torrent")).
 
-%% Find 8 nodes 
-
-dht_node:find_node(P, InfoHash).
-
-%% How many nodes do we know now?
-
-length(mnesia:dirty_all_keys(node)).
-
-
-%% !!!
-
-Spoofers = ctl:care_about(InfoHash, 16, 10000).
-
-%% ...
-
-ctl:reping(Spoofers, InfoHash).
