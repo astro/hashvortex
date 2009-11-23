@@ -3,13 +3,13 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/1, start_link/2]).
+-export([start_link/2]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
 	 terminate/2, code_change/3]).
 
--record(state, {sock, node_id, requests, t = 0, routes}).
+-record(state, {sock, node_id, requests, t = 0, question_cb}).
 -record(request, {t, addr, resend, caller, last_sent, ntry = 0}).
 
 -define(PKT_TIMEOUT, 2000).
@@ -20,28 +20,19 @@
 %%====================================================================
 %% API
 %%====================================================================
-ip_port_to_addr({A, B, C, D}, Port) ->
-    <<A:8, B:8, C:8, D:8, Port:16/big>>.
-
-addr_to_ip_port(<<A, B, C, D, Port:16/big>>) ->
-    {{A, B, C, D}, Port}.
-
-addr_to_s(<<A, B, C, D, Port:16/big>>) ->
-    io_lib:format("~B.~B.~B.~B:~B", [A, B, C, D, Port]).
-
-start_link(Port) ->
-    start_link(generate_node_id(), Port).
-
-start_link(NodeId, Port) ->
-    gen_server:start_link(?MODULE, [NodeId, Port], []).
+start_link(Port, QuestionCB) ->
+    gen_server:start_link(?MODULE, [Port, QuestionCB], []).
 
 %%====================================================================
 %% gen_server callbacks
 %%====================================================================
-init([NodeId, Port]) ->
+init([NodeId, Port, QuestionCB]) ->
     {ok, Sock} = gen_udp:open(Port, [binary, {active, true}]),
     Requests = ets:new(requests, [set, private, {keypos, #request.t}]),
-    next_state(ok, #state{sock = Sock, node_id = NodeId, requests = Requests, routes = routes:new(NodeId)}).
+    {ok, #state{sock = Sock,
+		requests = Requests,
+		node_id = NodeId,
+		question_cb = QuestionCB}}.
 
 handle_call({request, Addr, Q}, From, State) ->
     handle_call({request, Addr, Q, []}, From, State);
@@ -50,7 +41,7 @@ handle_call({request, Addr, Q, As}, From,
     I = self(),
     {T, T2} = next_t(T1),
     spawn_link(fun() ->
-		       io:format("request ~p to ~s~n", [Q, addr_to_s(Addr)]),
+		       io:format("request ~p to ~s~n", [Q, addr:to_s(Addr)]),
 		       %% {"t":"aa", "y":"q", "q":"ping", "a":{"id":"abcdefghij0123456789"}}
 		       Pkt = [{<<"t">>, T},
 			      {<<"y">>, <<"q">>},
@@ -59,7 +50,7 @@ handle_call({request, Addr, Q, As}, From,
 			       [{<<"id">>, NodeId} | As]
 			      }],
 		       PktBin = benc:to_binary(Pkt),
-		       {IP, Port} = addr_to_ip_port(Addr),
+		       {IP, Port} = addr:to_ip_port(Addr),
 		       Send = fun() ->
 				      gen_udp:send(Sock, IP, Port, PktBin)
 			      end,
@@ -77,7 +68,7 @@ handle_cast({insert_request, Request}, #state{requests = Requests} = State) ->
     ets:insert(Requests, Request),
     next_state(noreply, State);
 
-handle_cast({packet, Addr, Pkt}, State) ->
+handle_cast({packet, Addr, Pkt}, #state{question_cb = QuestionCB} = State) ->
     T = dict_get(<<"t">>, Pkt, <<>>),
     case dict_get(<<"y">>, Pkt, <<>>) of
 	<<"r">> ->
@@ -90,8 +81,8 @@ handle_cast({packet, Addr, Pkt}, State) ->
 	    spawn_link(fun() ->
 			       Q = dict_get(<<"q">>, Pkt, <<>>),
 			       A = dict_get(<<"a">>, Pkt, []),
-			       io:format("question from ~s: ~p~n", [addr_to_s(Addr), Q]),
-			       handle_question(Addr, T, Q, A, State)
+			       io:format("question from ~s: ~p~n", [addr:to_s(Addr), Q]),
+			       QuestionCB(Addr, T, Q, A, State)
 		       end),
 	    next_state(noreply, State);
 	_ ->
@@ -102,10 +93,10 @@ handle_info({udp, Sock, IP, Port, PktBin}, #state{sock = Sock} = State) ->
     I = self(),
     spawn_link(
       fun() ->
-	      Addr = ip_port_to_addr(IP, Port),
+	      Addr = addr:from_ip_port(IP, Port),
 	      case (catch benc:parse(PktBin)) of
 		  {'EXIT', Reason} ->
-		      io:format("Received garbage from ~s: ~p", [addr_to_s(Addr), Reason]);
+		      io:format("Received garbage from ~s: ~p", [addr:to_s(Addr), Reason]);
 		  Pkt ->
 		      gen_server:cast(I, {packet, Addr, Pkt})
 	      end
@@ -119,24 +110,17 @@ handle_info(timeout, #state{requests = Requests} = State) ->
 				 [Req | L];
 			    (_, L) -> L
 			 end, [], Requests),
-    Resends = lists:foldl(
-		fun(#request{caller = Caller, ntry = Ntry} = Req, Resends)
-		   when Ntry >= ?MAX_TRIES ->
-			ets:delete(Requests, Req#request.t),
-			gen_server:reply(Caller, timeout),
-			Resends;
-		   (#request{ntry = Ntry} = Req, Resends) ->
-			ets:insert(Requests, Req#request{ntry = Ntry + 1,
-							 last_sent = Now}),
-			(Req#request.resend)(),
-			Resends + 1
-		end, 0, TimedOut),
-    if
-	Resends > 0 ->
-	    next_state(noreply, State);
-	true ->
-	    next_state(noreply, State)
-    end;
+    lists:foreach(
+      fun(#request{caller = Caller, ntry = Ntry} = Req)
+	 when Ntry >= ?MAX_TRIES ->
+	      ets:delete(Requests, Req#request.t),
+	      gen_server:reply(Caller, timeout);
+	 (#request{ntry = Ntry} = Req) ->
+	      ets:insert(Requests, Req#request{ntry = Ntry + 1,
+					       last_sent = Now}),
+	      (Req#request.resend)()
+      end, TimedOut),
+    next_state(noreply, State);
 
 handle_info(_Info, State) ->
     next_state(noreply, State).
@@ -151,8 +135,25 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%--------------------------------------------------------------------
 
-next_state(Result, State) ->
-    {Result, State, 100}.
+next_state(Result, #state{requests = Requests} = State) ->
+    Now = util:mk_timestamp_ms(),
+    NextTimeout = ets:foldl(fun(#request{last_sent = LastSent}, NextTimeout1) ->
+				    NextTimeout2 = LastSent + ?PKT_TIMEOUT,
+				    if
+					NextTimeout1 == infinity ->
+					    NextTimeout2;
+					NextTimeout1 < NextTimeout2 ->
+					    NextTimeout1;
+					true ->
+					    NextTimeout2
+				    end
+			    end, infinity, Requests),
+    Delay = case NextTimeout of
+		infinity -> infinity;
+		_ when NextTimeout =< Now -> 1;
+		_ -> NextTimeout - Now
+	    end,
+    {Result, State, Delay}.
 
 handle_reply(Addr, T, Result, #state{requests = Requests} = State) ->
     case ets:lookup(Requests, T) of
@@ -161,29 +162,10 @@ handle_reply(Addr, T, Result, #state{requests = Requests} = State) ->
 	    gen_server:reply(Caller, Result);
 	[] ->
 	    %% Late?
-	    io:format("Unexpected packet from ~p with T=~p~n", [addr_to_s(Addr), T]),
+	    io:format("Unexpected packet from ~p with T=~p~n", [addr:to_s(Addr), T]),
 	    ignore
     end,
     next_state(noreply, State).
-
-
-handle_question(Addr, T, <<"ping">>, _As, #state{node_id = NodeId,
-						 sock = Sock}) ->
-    {IP, Port} = addr_to_ip_port(Addr),
-    Pkt = [{<<"t">>, T},
-	   {<<"y">>, <<"r">>},
-	   {<<"r">>,
-	    [{<<"id">>, NodeId}]
-	   }],
-    gen_udp:send(Sock, IP, Port, benc:to_binary(Pkt));
-
-handle_question(Addr, T, _Q, _As, #state{sock = Sock}) ->
-    {IP, Port} = addr_to_ip_port(Addr),
-    Pkt = [{<<"t">>, T},
-	   {<<"y">>, <<"e">>},
-	   {<<"e">>, [204, <<"I didn't hear you. Lala lala la.">>]
-	   }],
-    gen_udp:send(Sock, IP, Port, benc:to_binary(Pkt)).
 
 dict_get(Key, Dict, Default) ->
     case lists:keysearch(Key, 1, Dict) of
@@ -191,21 +173,8 @@ dict_get(Key, Dict, Default) ->
 	_ -> Default
     end.
 
-generate_node_id() ->
-    list_to_binary(
-      [random:uniform(256) - 1
-       || _ <- lists:seq(1, 20)]
-     ).
-
 next_t(T1) when T1 > 16#FFFF ->
     next_t(0);
 next_t(T1) ->
     T = <<((T1 bsr 16) band 16#FF):8, (T1 band 16#FF):8>>,
     {T, T1 + 1}.
-
-
-split_contact_nodes(<<PeerId:20/binary, Addr:6/binary, Rest/binary>>) ->
-    [{Addr, PeerId} | split_contact_nodes(Rest)];
-split_contact_nodes(_) ->
-    [].
-
