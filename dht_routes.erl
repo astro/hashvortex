@@ -1,6 +1,6 @@
 -module(dht_routes).
 
--export([new/1, insert/3, mark/4, pinged/2, next_action/1]).
+-export([new/1, insert/3, mark/4, pinged/2, discovered/2, next_action/1]).
 
 -record(routes, {node_id, buckets = []}).
 -record(bucket, {order,
@@ -10,11 +10,13 @@
 -record(peer, {addr,
 	       node_id,
 	       status = unsure,
-	       last_ping = 0}).
+	       last_ping = 0,
+	       last_discover = 0}).
 
 -define(BUCKET_SIZE, 8).
 -define(CACHE_MAX, 32).
 -define(PING_INTERVAL, 15 * 60 * 1000).
+-define(DISCOVER_INTERVAL, 5 * 60 * 1000).
 -define(LONG_DELAY, 60 * 1000).  %% infinity is not easily comparable
 
 %%====================================================================
@@ -49,42 +51,42 @@ insert(Routes, Addr1, NodeId1) ->
 
 mark(Routes, Addr1, NodeId1, NewStatus)
   when NewStatus == good; NewStatus == bad ->
-    UpdateFun = fun(#peer{addr = Addr2,
-			  node_id = NodeId2} = Peer)
-		   when Addr1 == Addr2 andalso NodeId1 == NodeId2 ->
-			Peer#peer{status = NewStatus};
-		   (Peer) -> Peer
-		end,
-    bucket_op(Routes, NodeId1,
-	      fun(#bucket{peers = Peers1,
-			  cached_peers = CachedPeers1} = Bucket1) ->
-		      Peers2 = lists:map(UpdateFun, Peers1),
-		      CachedPeers2 = lists:map(UpdateFun, CachedPeers1),
+    update_all_peers(Routes, NodeId1,
+		     fun(#peer{addr = Addr2,
+			       node_id = NodeId2} = Peer)
+			when Addr1 == Addr2 andalso NodeId1 == NodeId2 ->
+			     Peer#peer{status = NewStatus};
+			(Peer) -> Peer
+		     end, true).
 
-		      maintain_bucket(Bucket1#bucket{peers = Peers2,
-						     cached_peers = CachedPeers2})
-	      end).
-
+%% sent, nor received neither marked good/bad already
 pinged(Routes, NodeId1) ->
     Now = util:mk_timestamp_ms(),
-    UpdateFun = fun(#peer{node_id = NodeId2} = Peer)
-		   when NodeId1 == NodeId2 ->
-			Peer#peer{last_ping = Now};
-		   (Peer) ->
-			Peer
-		end,
-    bucket_op(Routes, NodeId1,
-	      fun(#bucket{peers = Peers,
-			  cached_peers = CachedPeers} = Bucket) ->
-		      Bucket#bucket{peers = lists:map(UpdateFun, Peers),
-				    cached_peers = lists:map(UpdateFun, CachedPeers)}
-	      end).
+    update_all_peers(Routes, NodeId1,
+		     fun(#peer{node_id = NodeId2} = Peer)
+			when NodeId1 == NodeId2 ->
+			     Peer#peer{last_ping = Now};
+			(Peer) ->
+			     Peer
+		     end).
 
--record(action, {time, action}).
+%% sent, nor received neither marked good/bad already
+discovered(Routes, NodeId1) ->
+    %%io:format("discovered(~p, ~p)~n",[Routes,NodeId1]),
+    Now = util:mk_timestamp_ms(),
+    update_all_peers(Routes, NodeId1,
+		     fun(#peer{node_id = NodeId2} = Peer)
+			when NodeId1 == NodeId2 ->
+			     Peer#peer{last_discover = Now};
+			(Peer) ->
+			     Peer
+		     end).
 
-%% returns {wait, NextInMS} | {ping, NodeId, Addr}
-next_action(#routes{buckets = Buckets}) ->
-    Actions = lists:map(fun next_action1/1, Buckets),
+-record(action, {time = infinity, action = nothing}).
+
+%% returns {wait, NextInMS} | {ping, NodeId, Addr} | {discover, NodeId, Addr, NodeId}
+next_action(#routes{node_id = NodeId, buckets = Buckets}) ->
+    Actions = [next_discovery(NodeId, Buckets) | lists:map(fun next_ping/1, Buckets)],
     Now = util:mk_timestamp_ms(),
     case soonest_action(Actions) of
 	#action{time = infinity} ->
@@ -95,7 +97,7 @@ next_action(#routes{buckets = Buckets}) ->
 	    {wait, Time - Now}
     end.
 
-next_action1(#bucket{peers = Peers}) ->
+next_ping(#bucket{peers = Peers}) ->
     PeerActions = [#action{time = LastPing + ?PING_INTERVAL,
 			   action = {ping, NodeId, Addr}}
 		   || #peer{node_id = NodeId, addr = Addr,
@@ -110,6 +112,27 @@ next_action1(#bucket{peers = Peers}) ->
 			 end,
     soonest_action([soonest_action(PeerActions) | CachedPeersActions]).
 
+%% done
+next_discovery(_, []) ->
+    #action{};
+%% skip if there's no next bucket to look up in
+next_discovery(NodeId, [#bucket{} | [#bucket{peers = []} = _ | _] = Buckets]) ->
+    next_discovery(NodeId, Buckets);
+next_discovery(NodeId, [#bucket{peers = Peers,
+				cached_peers = CachedPeers}
+			| [#bucket{peers = [_ | _] = NextPeers} = _ | _] = Buckets])
+  when length(Peers) < ?BUCKET_SIZE andalso length(CachedPeers) < ?BUCKET_SIZE ->
+    soonest_action([next_discovery(NodeId, Buckets)
+		    | [#action{time = LastDiscover1 + ?DISCOVER_INTERVAL,
+			       action = {discover, NodeId, Addr1, NodeId1}}
+		       || #peer{last_discover = LastDiscover1,
+				node_id = NodeId1,
+				addr = Addr1} <- NextPeers]
+		   ]);
+next_discovery(NodeId, [#bucket{} | Buckets]) ->
+    next_discovery(NodeId, Buckets).
+    
+
 soonest_action(Actions) ->
     lists:foldl(fun(#action{time = infinity}, Action) ->
 			Action;
@@ -120,7 +143,7 @@ soonest_action(Actions) ->
 			Action;
 		   (#action{}, #action{} = Action) ->
 			Action
-		end, #action{time = infinity, action = nothing}, Actions).
+		end, #action{}, Actions).
 			
 
 %%--------------------------------------------------------------------
@@ -138,6 +161,20 @@ bucket_op(#routes{node_id = NodeId,
     Buckets2 = lists:keystore(Order, #bucket.order, Buckets1, Bucket2),
     Routes#routes{buckets = lists:sort(Buckets2)}.
 
+update_all_peers(Routes, NodeId1, PeerFun) ->
+    update_all_peers(Routes, NodeId1, PeerFun, false).
+update_all_peers(Routes, NodeId1, PeerFun, Maintain) ->
+    bucket_op(Routes, NodeId1,
+	      fun(#bucket{peers = Peers,
+			  cached_peers = CachedPeers} = Bucket1) ->
+		      Bucket2 = Bucket1#bucket{peers = lists:map(PeerFun, Peers),
+					       cached_peers = lists:map(PeerFun, CachedPeers)},
+		      case Maintain of
+			  true -> maintain_bucket(Bucket2);
+			  false -> Bucket2
+		      end
+	      end).
+
 
 maintain_bucket(#bucket{peers = Peers1,
 			cached_peers = CachedPeers1} = Bucket) ->
@@ -154,6 +191,8 @@ maintain_bucket(#bucket{peers = Peers1,
 	lists:foldl(fun(#peer{status = good} = Peer, {Peers, CachedPeers})
 		       when length(Peers) < ?BUCKET_SIZE ->
 			    {[Peer | Peers], CachedPeers};
+		       (#peer{status = bad}, R) ->
+			    R;
 		       (Peer, {Peers, CachedPeers}) ->
 			    {Peers, [Peer | CachedPeers]}
 		    end, {Peers2, []}, CachedPeers2),

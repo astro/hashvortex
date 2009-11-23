@@ -11,6 +11,8 @@
 
 -record(state, {node_id, port, routes}).
 
+-define(MIN_TICK, 50).  %% 50 ms, no more than 20 pkt/s
+
 %%====================================================================
 %% API
 %%====================================================================
@@ -29,7 +31,7 @@ hint(Pid, Host, Port) when is_list(Host) ->
     end;
 hint(Pid, {_, _, _, _} = Host, Port) ->
     Addr = addr:from_ip_port(Host, Port),
-    gen_server:call(Pid, {hint, Addr}).
+    gen_server:call(Pid, {hint, Addr}, 10000).
 
 %%====================================================================
 %% gen_server callbacks
@@ -37,6 +39,7 @@ hint(Pid, {_, _, _, _} = Host, Port) ->
 init([NodeId, UdpPort]) ->
     I = self(),
     QuestionCB = fun(Addr, T, Q, A) ->
+			 %% TODO: implement replying, insert peer from incoming pings
 			 gen_server:call(I, {question, Addr, T, Q, A})
 		 end,
     {ok, DhtPort} = dht_port:start_link(NodeId, UdpPort, QuestionCB),
@@ -44,16 +47,12 @@ init([NodeId, UdpPort]) ->
 		node_id = NodeId,
 		routes = dht_routes:new(NodeId)}}.
 
-handle_call({hint, Addr}, From, #state{port = Port} = State) ->
+handle_call({hint, Addr}, From, #state{node_id = NodeId,
+				       port = Port} = State) ->
     I = self(),
     spawn_link(fun() ->
-		       case catch dht_port:ping(Port, Addr) of
-			   {ok, NodeId} ->
-			       gen_server:reply(From, ok),
-			       gen_server:cast(I, {hinted, Addr, NodeId});
-			   error ->
-			       gen_server:reply(From, error)
-		       end
+		       R = run_discovery(I, NodeId, Addr, Port),
+		       gen_server:reply(From, R)
 	       end),
     next_state(noreply, State).
 
@@ -61,10 +60,9 @@ handle_cast({mark, Addr, NodeId, Status}, #state{routes = Routes1} = State) ->
     Routes2 = dht_routes:mark(Routes1, Addr, NodeId, Status),
     next_state(noreply, State#state{routes = Routes2});
 
-handle_cast({hinted, Addr, NodeId}, #state{routes = Routes1} = State) ->
+handle_cast({insert, Addr, NodeId}, #state{routes = Routes1} = State) ->
     Routes2 = dht_routes:insert(Routes1, Addr, NodeId),
-    Routes3 = dht_routes:mark(Routes2, Addr, NodeId, good),
-    next_state(noreply, State#state{routes = Routes3}).   
+    next_state(noreply, State#state{routes = Routes2}).
 
 handle_info(timeout, State) ->
     next_state(noreply, State).
@@ -87,11 +85,14 @@ generate_node_id() ->
 
 next_state(Result, #state{routes = Routes1,
 			  port = Port} = State) ->
-    case dht_routes:next_action(Routes1) of
+    NA = dht_routes:next_action(Routes1),
+    io:format("next_action: ~p~n", [NA]),
+    case NA of
 	{wait, Delay} ->
 	    io:format("Waiting ~p ms~n", [Delay]),
 	    {Result, State, Delay};
 	{ping, NodeId, Addr} ->
+	    Routes2 = dht_routes:pinged(Routes1, NodeId),
 	    I = self(),
 	    spawn_link(fun() ->
 			       Status = case catch dht_port:ping(Port, Addr) of
@@ -100,6 +101,30 @@ next_state(Result, #state{routes = Routes1,
 					end,
 			       gen_server:cast(I, {mark, Addr, NodeId, Status})
 		       end),
-	    Routes2 = dht_routes:pinged(Routes1, NodeId),
-	    next_state(Result, State#state{routes = Routes2})
+	    {Result, State#state{routes = Routes2}, ?MIN_TICK};
+	{discover, NodeId, Addr1, NodeId1} ->
+	    Routes2 = dht_routes:discovered(Routes1, NodeId1),
+	    I = self(),
+	    spawn_link(
+	      fun() ->
+		      case run_discovery(I, NodeId, Addr1, Port) of
+			  ok ->
+			      gen_server:cast(I, {mark, Addr1, NodeId1, good});
+			  error ->
+			      gen_server:cast(I, {mark, Addr1, NodeId1, bad})
+		      end
+	      end),
+	    {Result, State#state{routes = Routes2}, ?MIN_TICK}
+    end.
+
+
+run_discovery(Pid, NodeId, Addr1, Port) ->
+    case catch dht_port:find_node(Port, Addr1, NodeId) of
+	{ok, [_ | _] = NodeIdsAddrs} ->
+	    lists:foreach(fun({NodeId2, Addr2}) ->
+				  gen_server:cast(Pid, {insert, NodeId2, Addr2})
+			  end, NodeIdsAddrs),
+	    ok;
+	_ ->
+	    error
     end.

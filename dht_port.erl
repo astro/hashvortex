@@ -3,7 +3,7 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/3, ping/2]).
+-export([start_link/3, ping/2, find_node/3]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -15,7 +15,7 @@
 -define(PKT_TIMEOUT, 2000).
 -define(MAX_TRIES, 3).
 
--define(CALL_TIMEOUT, 8000).
+-define(CALL_TIMEOUT, 9000).
 
 %%====================================================================
 %% API
@@ -24,14 +24,26 @@ start_link(NodeId, Port, QuestionCB) ->
     gen_server:start_link(?MODULE, [NodeId, Port, QuestionCB], []).
 
 ping(Pid, Addr) ->
-io:format("ping ~p ~p~n",[Pid,Addr]),
-    case gen_server:call(Pid, {request, Addr, <<"ping">>}) of
+    io:format("ping ~p ~s~n",[Pid,addr:to_s(Addr)]),
+    case gen_server:call(Pid, {request, Addr, <<"ping">>}, ?CALL_TIMEOUT) of
 	{ok, R} ->
 	    case dict_get(<<"id">>, R, false) of
 		<<NodeId:20/binary>> -> {ok, NodeId};
 		_ -> error
 	    end;
 	_ -> error
+    end.
+
+find_node(Pid, Addr, NodeId) ->
+    io:format("ping ~p ~s ~p~n",[Pid,addr:to_s(Addr),NodeId]),
+    case gen_server:call(Pid, {request, Addr,
+			       <<"find_node">>, [<<"target">>, NodeId]},
+			 ?CALL_TIMEOUT) of
+	{ok, R} ->
+	    Nodes = dict_get(<<"nodes">>, R, <<>>),
+	    NodeIdsAddrs = split_contact_nodes(Nodes),
+	    {ok, NodeIdsAddrs};
+	E -> E
     end.
 
 %%====================================================================
@@ -71,6 +83,7 @@ handle_call({request, Addr, Q, As}, From,
 					  caller = From,
 					  last_sent = util:mk_timestamp_ms()},
 		       gen_server:cast(I, {insert_request, Request}),
+		       io:format("send ~p~n",[Pkt]),
 		       Send()
 	       end),
     next_state(noreply, State#state{t = T2}).
@@ -107,8 +120,9 @@ handle_info({udp, Sock, IP, Port, PktBin}, #state{sock = Sock} = State) ->
 	      Addr = addr:from_ip_port(IP, Port),
 	      case (catch benc:parse(PktBin)) of
 		  {'EXIT', Reason} ->
-		      io:format("Received garbage from ~s: ~p", [addr:to_s(Addr), Reason]);
+		      io:format("Received garbage from ~s: ~p~n", [addr:to_s(Addr), Reason]);
 		  Pkt ->
+		      io:format("Received from ~s: ~p~n", [addr:to_s(Addr), Pkt]),
 		      gen_server:cast(I, {packet, Addr, Pkt})
 	      end
       end),
@@ -190,3 +204,8 @@ next_t(T1) when T1 > 16#FFFF ->
 next_t(T1) ->
     T = <<((T1 bsr 16) band 16#FF):8, (T1 band 16#FF):8>>,
     {T, T1 + 1}.
+
+split_contact_nodes(<<PeerId:20/binary, Addr:6/binary, Rest/binary>>) ->
+    [{PeerId, Addr} | split_contact_nodes(Rest)];
+split_contact_nodes(_) ->
+    [].

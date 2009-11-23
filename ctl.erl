@@ -1,6 +1,6 @@
 -module(ctl).
 
--export([dir_torrents/1, look_nodes_from_dir/2, care_about/3, reping/2]).
+-export([dir_torrents/1, look_nodes_from_dir/2, hint_from_dir/2]).
 
 
 dir_torrents(Dir) ->
@@ -32,27 +32,20 @@ look_nodes_from_dir(NodePid, Dir) ->
 		end)
       end, InfoHashes).
 
-care_about(InfoHash, NodeCount, PortBase) ->
-    <<InfoHashNum:160/big-unsigned>> = InfoHash,
-    Nodes = [Node1 | _] =
-	lists:map(
-	  fun(N) ->
-		  NodeId = <<(InfoHashNum - (NodeCount div 2) + N):160/big-unsigned>>,
-		  {ok, Pid} = dht_node:start_link(NodeId, PortBase + N),
-		  Pid
-	  end,
-	  lists:seq(0, NodeCount - 1)),
-    dht_node:ping(Node1, "router.bittorrent.com", 6881),
-    reping(Nodes, InfoHash),
-    Nodes.
+hint_from_dir(NodePid, Dir) ->
+    lists:foreach(fun(File) ->
+			  case catch benc:parse_file(File) of
+			      {'EXIT', Reason} ->
+				  io:format("Cannot parse ~s: ~p~n", [File, Reason]);
+			      Torrent ->
+				  Addrs = proplists:get_value(<<"nodes">>, Torrent, []),
+				  lists:foreach(
+				    fun([Host, Port])
+				       when is_binary(Host), is_integer(Port) ->
+					    dht_node:hint(NodePid, binary_to_list(Host), Port);
+				       (Node) ->
+					    io:format("Bogus node in file ~s: ~p~n", [File, Node])
+				    end, Addrs)
+			  end
+		  end, dir_torrents(Dir)).
 
-reping([Node1 | _] = Nodes, InfoHash) ->			  
-    Neighbors = dht_node:find_node(Node1, InfoHash),
-    util:pmap(fun({NeighborIP, NeighborPort}) ->
-		       util:pmap(fun(Node) ->
-					  catch dht_node:ping(Node, NeighborIP, NeighborPort)
-				  end, Nodes)
-	       end, Neighbors),
-    Nodes.
-
-			  
