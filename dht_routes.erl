@@ -138,13 +138,14 @@ next_discovery(_, []) ->
 %% skip if there's no next bucket to look up in
 next_discovery(NodeId, [#bucket{} | [#bucket{peers = []} = _ | _] = Buckets]) ->
     next_discovery(NodeId, Buckets);
-next_discovery(NodeId, [#bucket{peers = Peers,
+next_discovery(NodeId, [#bucket{order = Order,
+				peers = Peers,
 				cached_peers = CachedPeers}
 			| [#bucket{peers = [_ | _] = NextPeers} = _ | _] = Buckets])
   when length(Peers) < ?BUCKET_SIZE andalso length(CachedPeers) < ?BUCKET_SIZE ->
     soonest_action([next_discovery(NodeId, Buckets)
 		    | [#action{time = LastDiscover1 + ?DISCOVER_INTERVAL,
-			       action = {discover, NodeId, Addr1, NodeId1}}
+			       action = {discover, randomize_node_id(NodeId, Order), Addr1, NodeId1}}
 		       || #peer{last_discover = LastDiscover1,
 				node_id = NodeId1,
 				addr = Addr1} <- NextPeers]
@@ -242,3 +243,15 @@ distance_order(A, B) ->
 distance_order1(0, Order) -> Order;
 distance_order1(Distance, Order) ->
     distance_order1(Distance bsr 1, Order + 1).
+
+randomize_node_id(<<Node:160/big-unsigned>> = NodeId, Order) ->
+    <<Rnd:160/big-unsigned>> = dht_node:generate_node_id(),
+    R = Node bxor (Rnd band ones(Order)),
+    ResultId = <<R:160/big-unsigned>>,
+    case distance_order(NodeId, ResultId) of
+	Order -> ResultId;
+	_O -> randomize_node_id(NodeId, Order)
+    end.
+
+ones(0) -> 0;
+ones(N) -> (ones(N - 1) bsl 1) bor 1.
