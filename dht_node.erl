@@ -3,7 +3,7 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/1, start_link/2, hint/3]).
+-export([start_link/1, start_link/2, hint/3, generate_node_id/0]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -51,7 +51,7 @@ handle_call({hint, Addr}, From, #state{node_id = NodeId,
 				       port = Port} = State) ->
     I = self(),
     spawn_link(fun() ->
-		       R = run_discovery(I, NodeId, Addr, Port),
+		       R = run_discovery(I, Addr, NodeId, Port),
 		       gen_server:reply(From, R)
 	       end),
     next_state(noreply, State).
@@ -91,7 +91,7 @@ next_state(Result, #state{routes = Routes1,
 	{wait, Delay} ->
 	    io:format("Waiting ~p ms~n", [Delay]),
 	    {Result, State, Delay};
-	{ping, NodeId, Addr} ->
+	{ping, Addr, NodeId} ->
 	    Routes2 = dht_routes:pinged(Routes1, NodeId),
 	    I = self(),
 	    spawn_link(fun() ->
@@ -107,7 +107,7 @@ next_state(Result, #state{routes = Routes1,
 	    I = self(),
 	    spawn_link(
 	      fun() ->
-		      case run_discovery(I, NodeId, Addr1, Port) of
+		      case run_discovery(I, Addr1, NodeId, Port) of
 			  ok ->
 			      gen_server:cast(I, {mark, Addr1, NodeId1, good});
 			  error ->
@@ -118,11 +118,11 @@ next_state(Result, #state{routes = Routes1,
     end.
 
 
-run_discovery(Pid, NodeId, Addr1, Port) ->
+run_discovery(Pid, Addr1, NodeId, Port) ->
     case catch dht_port:find_node(Port, Addr1, NodeId) of
 	{ok, [_ | _] = NodeIdsAddrs} ->
 	    lists:foreach(fun({NodeId2, Addr2}) ->
-				  gen_server:cast(Pid, {insert, NodeId2, Addr2})
+				  gen_server:cast(Pid, {insert, Addr2, NodeId2})
 			  end, NodeIdsAddrs),
 	    ok;
 	_ ->

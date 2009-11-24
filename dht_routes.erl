@@ -35,9 +35,8 @@ insert(Routes, Addr1, NodeId1) ->
 			  cached_peers = CachedPeers} = Bucket) ->
 		      if
 			  length(CachedPeers) < ?CACHE_MAX ->
-			      KnowAlready = lists:any(fun(#peer{addr = Addr2,
-								node_id = NodeId2}) ->
-							      Addr1 == Addr2 andalso NodeId1 == NodeId2
+			      KnowAlready = lists:any(fun(#peer{node_id = NodeId2}) ->
+							      NodeId1 == NodeId2
 						      end, Peers ++ CachedPeers),
 			      case KnowAlready of
 				  false ->
@@ -72,7 +71,6 @@ pinged(Routes, NodeId1) ->
 
 %% sent, nor received neither marked good/bad already
 discovered(Routes, NodeId1) ->
-    %%io:format("discovered(~p, ~p)~n",[Routes,NodeId1]),
     Now = util:mk_timestamp_ms(),
     update_all_peers(Routes, NodeId1,
 		     fun(#peer{node_id = NodeId2} = Peer)
@@ -84,7 +82,7 @@ discovered(Routes, NodeId1) ->
 
 -record(action, {time = infinity, action = nothing}).
 
-%% returns {wait, NextInMS} | {ping, NodeId, Addr} | {discover, NodeId, Addr, NodeId}
+%% returns {wait, NextInMS} | {ping, Addr, NodeId} | {discover, NodeId, Addr, NodeId}
 next_action(#routes{node_id = NodeId, buckets = Buckets}) ->
     Actions = [next_discovery(NodeId, Buckets) | lists:map(fun next_ping/1, Buckets)],
     Now = util:mk_timestamp_ms(),
@@ -97,17 +95,17 @@ next_action(#routes{node_id = NodeId, buckets = Buckets}) ->
 	    {wait, Time - Now}
     end.
 
-next_ping(#bucket{peers = Peers}) ->
+next_ping(#bucket{peers = Peers, cached_peers = CachedPeers}) ->
     PeerActions = [#action{time = LastPing + ?PING_INTERVAL,
-			   action = {ping, NodeId, Addr}}
+			   action = {ping, Addr, NodeId}}
 		   || #peer{node_id = NodeId, addr = Addr,
 			    last_ping = LastPing} <- Peers],
     CachedPeersActions = if
 			     length(Peers) < ?BUCKET_SIZE ->
 				 [#action{time = LastPing + ?PING_INTERVAL,
-					  action = {ping, NodeId, Addr}}
+					  action = {ping, Addr, NodeId}}
 				  || #peer{node_id = NodeId, addr = Addr,
-					   last_ping = LastPing} <- Peers];
+					   last_ping = LastPing} <- CachedPeers];
 			     true -> []
 			 end,
     soonest_action([soonest_action(PeerActions) | CachedPeersActions]).
