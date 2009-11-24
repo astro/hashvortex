@@ -38,17 +38,35 @@ hint(Pid, {_, _, _, _} = Host, Port) ->
 %%====================================================================
 init([NodeId, UdpPort]) ->
     I = self(),
-    QuestionCB = fun(Addr, T, Q, A) ->
+    QuestionCB = fun(Addr, Q, A) ->
 			 %% TODO: implement replying, insert peer from incoming pings
-			 gen_server:call(I, {question, Addr, T, Q, A})
+			 gen_server:call(I, {question, Addr, Q, A})
 		 end,
     {ok, DhtPort} = dht_port:start_link(NodeId, UdpPort, QuestionCB),
     {ok, #state{port = DhtPort,
 		node_id = NodeId,
 		routes = dht_routes:new(NodeId)}}.
 
-handle_call({question, Addr, T, Q, As}, From, State) ->
-    next_state(noreply, State);
+handle_call({question, _Addr, <<"ping">>, _As}, _From, State) ->
+    %% TODO: insert with id
+    next_state({reply, {ok, []}}, State);
+
+handle_call({question, _Addr, <<"find_node">>, As}, _From, #state{routes = Routes} = State) ->
+    R = case proplists:get_value(<<"target">>, As) of
+	    <<Target:20/binary>> ->
+		Nodes = dht_routes:find_node(Routes, Target),
+		{ok, [<<"nodes">>,
+		      list_to_binary(
+			[[NodeId1, Addr1]
+			 || {<<NodeId1:20/binary>>, <<Addr1:6/binary>>} <- Nodes])
+		      ]};
+	    _ -> error
+	end,
+    io:format("R: ~p~n", [R]),
+    next_state({reply, R}, State);
+
+handle_call({question, _Addr, _Q, _As}, _From, State) ->
+    next_state({reply, error}, State);
 
 handle_call({hint, Addr}, From, #state{node_id = NodeId,
 				       port = Port} = State) ->
@@ -87,13 +105,22 @@ generate_node_id() ->
      ).
 
 next_state(Result, #state{routes = Routes1,
-			  port = Port} = State) ->
+			   port = Port} = State) ->
     NA = dht_routes:next_action(Routes1),
     io:format("next_action: ~p~n", [NA]),
+    ResultFun = case Result of
+		    {reply, Reply} ->
+			fun(State1, Delay1) ->
+				{reply, Reply, State1, Delay1}
+			end;
+		    noreply ->
+			fun(State1, Delay1) ->
+				{noreply, State1, Delay1}
+			end
+		end,
     case NA of
 	{wait, Delay} ->
-	    io:format("Waiting ~p ms~n", [Delay]),
-	    {Result, State, Delay};
+	    ResultFun(State, Delay);
 	{ping, Addr, NodeId} ->
 	    Routes2 = dht_routes:pinged(Routes1, NodeId),
 	    I = self(),
@@ -105,7 +132,7 @@ next_state(Result, #state{routes = Routes1,
 			       io:format("~s status=~p~n", [addr:to_s(Addr), Status]),
 			       gen_server:cast(I, {mark, Addr, NodeId, Status})
 		       end),
-	    {Result, State#state{routes = Routes2}, ?MIN_TICK};
+	    ResultFun(State#state{routes = Routes2}, ?MIN_TICK);
 	{discover, NodeId, Addr1, NodeId1} ->
 	    Routes2 = dht_routes:discovered(Routes1, NodeId1),
 	    I = self(),
@@ -118,7 +145,7 @@ next_state(Result, #state{routes = Routes1,
 			      gen_server:cast(I, {mark, Addr1, NodeId1, bad})
 		      end
 	      end),
-	    {Result, State#state{routes = Routes2}, ?MIN_TICK}
+	    ResultFun(State#state{routes = Routes2}, ?MIN_TICK)
     end.
 
 

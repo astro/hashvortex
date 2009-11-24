@@ -1,6 +1,6 @@
 -module(dht_routes).
 
--export([new/1, insert/3, mark/4, pinged/2, discovered/2, next_action/1]).
+-export([new/1, insert/3, mark/4, pinged/2, discovered/2, next_action/1, find_node/2]).
 
 -record(routes, {node_id, buckets = []}).
 -record(bucket, {order,
@@ -57,6 +57,27 @@ mark(Routes, Addr1, NodeId1, NewStatus)
 			     Peer#peer{status = NewStatus};
 			(Peer) -> Peer
 		     end, true).
+
+%% returns [{NodeId, Addr}]
+find_node(#routes{node_id = NodeId, buckets = Buckets}, NodeId1) ->
+    Order = distance_order(NodeId, NodeId1),
+    Peers = find_node1(Order, Buckets, []),
+    %%io:format("Found ~p peers for order ~p in ~p~n",[length(Peers),Order,[{OrderX,length(PeersX)}
+    %%									  || #bucket{order = OrderX, peers = PeersX} <- Buckets]]),
+    SelectedPeers = cut(8, sort_by_distance(NodeId1, Peers)),
+    [{NodeId2, Addr2}
+     || #peer{node_id = NodeId2,
+	      addr = Addr2} <- SelectedPeers].
+
+find_node1(_, _, Result) when length(Result) >= ?BUCKET_SIZE ->
+    Result;
+find_node1(_, [], Result) ->
+    Result;
+find_node1(Order, [#bucket{order = Order1, peers = Peers} | Buckets], Result)
+  when Order1 >= Order - 1 ->
+    find_node1(Order, Buckets, Peers ++ Result);
+find_node1(Order, [_ | Buckets], []) ->
+    find_node1(Order, Buckets, []).
 
 %% sent, nor received neither marked good/bad already
 pinged(Routes, NodeId1) ->
@@ -199,11 +220,16 @@ maintain_bucket(#bucket{peers = Peers1,
     Bucket#bucket{peers = Peers3,
 		  cached_peers = CachedPeers3}.
 
-%% sort_by_distance(InfoHash, Nodes) ->
-%%     lists:sort(fun(#node{node_id = NodeId1},
-%% 		   #node{node_id = NodeId2}) ->
-%% 		       distance(InfoHash, NodeId1) =< distance(InfoHash, NodeId2)
-%% 	       end, Nodes).
+cut(0, _) -> [];
+cut(_, []) -> [];
+cut(N, [E | L]) -> [E | cut(N - 1, L)].
+    
+
+sort_by_distance(InfoHash, Nodes) ->
+    lists:sort(fun(#peer{node_id = NodeId1},
+		   #peer{node_id = NodeId2}) ->
+		       distance(InfoHash, NodeId1) =< distance(InfoHash, NodeId2)
+	       end, Nodes).
 
 distance(<<A:160/big-unsigned>>, <<B:160/big-unsigned>>) ->
     A bxor B;

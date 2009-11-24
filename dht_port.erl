@@ -89,7 +89,9 @@ handle_cast({insert_request, Request}, #state{requests = Requests} = State) ->
     ets:insert(Requests, Request),
     next_state(noreply, State);
 
-handle_cast({packet, Addr, Pkt}, #state{question_cb = QuestionCB} = State) ->
+handle_cast({packet, Addr, Pkt}, #state{node_id = NodeId,
+					sock = Sock,
+					question_cb = QuestionCB} = State) ->
     T = dict_get(<<"t">>, Pkt, <<>>),
     case dict_get(<<"y">>, Pkt, <<>>) of
 	<<"r">> ->
@@ -101,9 +103,27 @@ handle_cast({packet, Addr, Pkt}, #state{question_cb = QuestionCB} = State) ->
 	<<"q">> ->
 	    spawn_link(fun() ->
 			       Q = dict_get(<<"q">>, Pkt, <<>>),
-			       A = dict_get(<<"a">>, Pkt, []),
-			       io:format("question from ~s: ~p~n", [addr:to_s(Addr), Q])
-			       %%QuestionCB(Addr, T, Q, A)
+			       As = dict_get(<<"a">>, Pkt, []),
+			       io:format("question from ~s: ~p~n", [addr:to_s(Addr), Q]),
+			       Reply = case catch QuestionCB(Addr, Q, As) of
+					   {ok, ReplyAs} ->
+					       [{<<"t">>, T},
+						{<<"y">>, <<"r">>},
+						{<<"r">>, [{<<"id">>, NodeId}
+							   | ReplyAs]}];
+					   error ->
+					       [{<<"t">>, T},
+						{<<"y">>, <<"e">>},
+						{<<"e">>, [204, "What do you want?"]}];
+					   {'EXIT', Reason} ->
+					       io:format("QuestionCB error: ~p~n", [Reason]),
+					       [{<<"t">>, T},
+						{<<"y">>, <<"e">>},
+						{<<"e">>, [202, "Oops"]}]
+				       end,
+			       ReplyBin = benc:to_binary(Reply),
+			       {IP, Port} = addr:to_ip_port(Addr),
+			       gen_udp:send(Sock, IP, Port, ReplyBin)
 		       end),
 	    next_state(noreply, State);
 	_ ->
