@@ -35,7 +35,7 @@ ping(Pid, Addr) ->
     end.
 
 find_node(Pid, Addr, NodeId) ->
-    io:format("ping ~p ~s ~p~n",[Pid,addr:to_s(Addr),NodeId]),
+    io:format("find_node ~p ~s ~p~n",[Pid,addr:to_s(Addr),NodeId]),
     case gen_server:call(Pid, {request, Addr,
 			       <<"find_node">>, [<<"target">>, NodeId]},
 			 ?CALL_TIMEOUT) of

@@ -1,6 +1,6 @@
 -module(ctl).
 
--export([dir_torrents/1, look_nodes_from_dir/2, hint_from_dir/2]).
+-export([dir_torrents/1, look_nodes_from_dir/2, hint_from_dir/2, hint_from_rtorrent/2]).
 
 
 dir_torrents(Dir) ->
@@ -49,3 +49,16 @@ hint_from_dir(NodePid, Dir) ->
 			  end
 		  end, dir_torrents(Dir)).
 
+hint_from_rtorrent(NodePid, CacheFile) ->
+    Cache = benc:parse_file(CacheFile),
+    Nodes = proplists:get_value(<<"nodes">>, Cache, []),
+    lists:foreach(fun({_NodeId, Dict}) ->
+			  I = proplists:get_value(<<"i">>, Dict, nil),
+			  P = proplists:get_value(<<"p">>, Dict, nil),
+			  if
+			      is_integer(I), is_integer(P) ->
+				  <<A, B, C, D>> = <<I:32/big>>,
+				  dht_node:hint(NodePid, {A, B, C, D}, P);
+			      true -> ignore
+			  end
+		  end, Nodes).
