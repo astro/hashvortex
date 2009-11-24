@@ -10,7 +10,7 @@
 	 terminate/2, code_change/3]).
 
 -record(state, {sock, node_id, requests, t = 0, question_cb}).
--record(request, {t, addr, resend, caller, last_sent, ntry = 0}).
+-record(request, {t, q, addr, resend, caller, last_sent, ntry = 0}).
 
 -define(PKT_TIMEOUT, 2000).
 -define(MAX_TRIES, 3).
@@ -73,9 +73,12 @@ handle_call({request, Addr, Q, As}, From,
 		       PktBin = benc:to_binary(Pkt),
 		       {IP, Port} = addr:to_ip_port(Addr),
 		       Send = fun() ->
+				      collectd:inc_counter(if_octets, "dht", [0, 28 + size(PktBin)]),
+				      collectd:inc_counter(if_packets, "dht", [0, 1]),
 				      gen_udp:send(Sock, IP, Port, PktBin)
 			      end,
 		       Request = #request{t = T,
+					  q = Q,
 					  addr = Addr,
 					  resend = Send,
 					  caller = From,
@@ -105,6 +108,7 @@ handle_cast({packet, Addr, Pkt}, #state{node_id = NodeId,
 			       Q = dict_get(<<"q">>, Pkt, <<>>),
 			       As = dict_get(<<"a">>, Pkt, []),
 			       io:format("question from ~s: ~p~n", [addr:to_s(Addr), Q]),
+			       collectd:inc_counter(counter, list_to_binary(["request-", Q]), [1]),
 			       Reply = case catch QuestionCB(Addr, Q, As) of
 					   {ok, ReplyAs} ->
 					       [{<<"t">>, T},
@@ -123,6 +127,8 @@ handle_cast({packet, Addr, Pkt}, #state{node_id = NodeId,
 				       end,
 			       ReplyBin = benc:to_binary(Reply),
 			       {IP, Port} = addr:to_ip_port(Addr),
+			       collectd:inc_counter(if_octets, "dht", [0, 28 + size(ReplyBin)]),
+			       collectd:inc_counter(if_packets, "dht", [0, 1]),
 			       gen_udp:send(Sock, IP, Port, ReplyBin)
 		       end),
 	    next_state(noreply, State);
@@ -131,6 +137,8 @@ handle_cast({packet, Addr, Pkt}, #state{node_id = NodeId,
     end.
 
 handle_info({udp, Sock, IP, Port, PktBin}, #state{sock = Sock} = State) ->
+    collectd:inc_counter(if_octets, "dht", [28 + size(PktBin), 0]),
+    collectd:inc_counter(if_packets, "dht", [1, 0]),
     I = self(),
     spawn_link(
       fun() ->
@@ -198,10 +206,12 @@ next_state(Result, #state{requests = Requests} = State) ->
     {Result, State, Delay}.
 
 handle_reply(Addr, T, Result, #state{requests = Requests} = State) ->
+    Now = util:mk_timestamp_ms(),
     case ets:lookup(Requests, T) of
-	[#request{caller = Caller}] ->
+	[#request{caller = Caller, q = Q, last_sent = LastSent}] ->
 	    ets:delete(Requests, T),
-	    gen_server:reply(Caller, Result);
+	    gen_server:reply(Caller, Result),
+	    collectd:set_gauge(latency, list_to_binary(["request-", Q]), [(Now - LastSent) / 1000]);
 	[] ->
 	    %% Late?
 	    io:format("Unexpected packet from ~p with T=~p~n", [addr:to_s(Addr), T]),
