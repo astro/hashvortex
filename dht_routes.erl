@@ -84,6 +84,7 @@ discovered(Routes, NodeId1) ->
 
 %% returns {wait, NextInMS} | {ping, Addr, NodeId} | {discover, NodeId, Addr, NodeId}
 next_action(#routes{node_id = NodeId, buckets = Buckets}) ->
+    %%io:format("next_discovery: ~p~n",[next_discovery(NodeId, Buckets)]),
     Actions = [next_discovery(NodeId, Buckets) | lists:map(fun next_ping/1, Buckets)],
     Now = util:mk_timestamp_ms(),
     case soonest_action(Actions) of

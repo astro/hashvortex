@@ -47,6 +47,9 @@ init([NodeId, UdpPort]) ->
 		node_id = NodeId,
 		routes = dht_routes:new(NodeId)}}.
 
+handle_call({question, Addr, T, Q, As}, From, State) ->
+    next_state(noreply, State);
+
 handle_call({hint, Addr}, From, #state{node_id = NodeId,
 				       port = Port} = State) ->
     I = self(),
@@ -99,6 +102,7 @@ next_state(Result, #state{routes = Routes1,
 					    {ok, NodeId} -> good;
 					    _ -> bad
 					end,
+			       io:format("~s status=~p~n", [addr:to_s(Addr), Status]),
 			       gen_server:cast(I, {mark, Addr, NodeId, Status})
 		       end),
 	    {Result, State#state{routes = Routes2}, ?MIN_TICK};

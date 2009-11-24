@@ -24,7 +24,6 @@ start_link(NodeId, Port, QuestionCB) ->
     gen_server:start_link(?MODULE, [NodeId, Port, QuestionCB], []).
 
 ping(Pid, Addr) ->
-    io:format("ping ~p ~s~n",[Pid,addr:to_s(Addr)]),
     case gen_server:call(Pid, {request, Addr, <<"ping">>}, ?CALL_TIMEOUT) of
 	{ok, R} ->
 	    case dict_get(<<"id">>, R, false) of
@@ -35,7 +34,6 @@ ping(Pid, Addr) ->
     end.
 
 find_node(Pid, Addr, NodeId) ->
-    io:format("find_node ~p ~s ~p~n",[Pid,addr:to_s(Addr),NodeId]),
     case gen_server:call(Pid, {request, Addr,
 			       <<"find_node">>, [{<<"target">>, NodeId}]},
 			 ?CALL_TIMEOUT) of
@@ -83,7 +81,6 @@ handle_call({request, Addr, Q, As}, From,
 					  caller = From,
 					  last_sent = util:mk_timestamp_ms()},
 		       gen_server:cast(I, {insert_request, Request}),
-		       io:format("send ~p~n",[Pkt]),
 		       Send()
 	       end),
     next_state(noreply, State#state{t = T2}).
@@ -105,8 +102,8 @@ handle_cast({packet, Addr, Pkt}, #state{question_cb = QuestionCB} = State) ->
 	    spawn_link(fun() ->
 			       Q = dict_get(<<"q">>, Pkt, <<>>),
 			       A = dict_get(<<"a">>, Pkt, []),
-			       io:format("question from ~s: ~p~n", [addr:to_s(Addr), Q]),
-			       QuestionCB(Addr, T, Q, A)
+			       io:format("question from ~s: ~p~n", [addr:to_s(Addr), Q])
+			       %%QuestionCB(Addr, T, Q, A)
 		       end),
 	    next_state(noreply, State);
 	_ ->
@@ -122,7 +119,7 @@ handle_info({udp, Sock, IP, Port, PktBin}, #state{sock = Sock} = State) ->
 		  {'EXIT', Reason} ->
 		      io:format("Received garbage from ~s: ~p~n", [addr:to_s(Addr), Reason]);
 		  Pkt ->
-		      io:format("Received from ~s: ~p~n", [addr:to_s(Addr), Pkt]),
+		      %%io:format("Received from ~s: ~p~n", [addr:to_s(Addr), Pkt]),
 		      gen_server:cast(I, {packet, Addr, Pkt})
 	      end
       end),
@@ -143,7 +140,6 @@ handle_info(timeout, #state{requests = Requests} = State) ->
 	 (#request{ntry = Ntry} = Req) ->
 	      ets:insert(Requests, Req#request{ntry = Ntry + 1,
 					       last_sent = Now}),
-	      io:format("Resending~n"),
 	      (Req#request.resend)()
       end, TimedOut),
     next_state(noreply, State);
