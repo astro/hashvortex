@@ -47,11 +47,10 @@ init([NodeId, UdpPort]) ->
 		node_id = NodeId,
 		routes = dht_routes:new(NodeId)}}.
 
-handle_call({question, _Addr, <<"ping">>, _As}, _From, State) ->
-    %% TODO: insert with id
-    next_state({reply, {ok, []}}, State);
+handle_call({question, Addr, <<"ping">>, As}, _From, #state{routes = Routes} = State) ->
+    next_state({reply, {ok, []}}, State#state{routes = insert_from_question(Routes, Addr, As)});
 
-handle_call({question, _Addr, <<"find_node">>, As}, _From, #state{routes = Routes} = State) ->
+handle_call({question, Addr, <<"find_node">>, As}, _From, #state{routes = Routes} = State) ->
     R = case proplists:get_value(<<"target">>, As) of
 	    <<Target:20/binary>> ->
 		Nodes = dht_routes:find_node(Routes, Target),
@@ -62,8 +61,7 @@ handle_call({question, _Addr, <<"find_node">>, As}, _From, #state{routes = Route
 		      ]};
 	    _ -> error
 	end,
-    io:format("R: ~p~n", [R]),
-    next_state({reply, R}, State);
+    next_state({reply, R}, State#state{routes = insert_from_question(Routes, Addr, As)});
 
 handle_call({question, _Addr, _Q, _As}, _From, State) ->
     next_state({reply, error}, State);
@@ -158,4 +156,11 @@ run_discovery(Pid, Addr1, NodeId, Port) ->
 	    ok;
 	_ ->
 	    error
+    end.
+
+insert_from_question(Routes, Addr, As) ->
+    case proplists:get_value(<<"id">>, As) of
+	<<NodeId:20/binary>> ->
+	    dht_routes:insert(Routes, Addr, NodeId);
+	_ -> Routes
     end.
