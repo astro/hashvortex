@@ -37,7 +37,7 @@ ping(Pid, Addr) ->
 find_node(Pid, Addr, NodeId) ->
     io:format("find_node ~p ~s ~p~n",[Pid,addr:to_s(Addr),NodeId]),
     case gen_server:call(Pid, {request, Addr,
-			       <<"find_node">>, [<<"target">>, NodeId]},
+			       <<"find_node">>, [{<<"target">>, NodeId}]},
 			 ?CALL_TIMEOUT) of
 	{ok, R} ->
 	    Nodes = dict_get(<<"nodes">>, R, <<>>),
