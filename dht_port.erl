@@ -114,12 +114,12 @@ handle_cast({packet, Addr, Pkt}, #state{node_id = NodeId,
 					   error ->
 					       [{<<"t">>, T},
 						{<<"y">>, <<"e">>},
-						{<<"e">>, [204, "What do you want?"]}];
+						{<<"e">>, [204, <<"What do you want?">>]}];
 					   {'EXIT', Reason} ->
 					       io:format("QuestionCB error: ~p~n", [Reason]),
 					       [{<<"t">>, T},
 						{<<"y">>, <<"e">>},
-						{<<"e">>, [202, "Oops"]}]
+						{<<"e">>, [202, <<"Oops">>]}]
 				       end,
 			       ReplyBin = benc:to_binary(Reply),
 			       {IP, Port} = addr:to_ip_port(Addr),
