@@ -16,15 +16,13 @@ newtype T = T B8.ByteString
     deriving (Eq, Show, Ord)
 
 data Packet = QPacket T Query
-            | RPacket T BValue
+            | RPacket T Reply
             | EPacket T Error
            deriving (Show, Eq)
 data Query = Ping NodeId
            | FindNode NodeId NodeId
            deriving (Show, Eq)
-data Reply = PingReply NodeId
-           | FindNodeReply NodeId [(NodeId, SockAddr)]
-           deriving (Show, Eq)
+type Reply = BValue
 data Error = Error Integer B8.ByteString
            deriving (Show, Eq)
 
@@ -76,7 +74,7 @@ encodePacket (QPacket (T t) qry)
 serializeNodeId :: NodeId -> B8.ByteString
 serializeNodeId (NodeId word)
     = runPut $
-      forM_ [19..0] $ \i ->
+      forM_ (reverse [0..19]) $ \i ->
           putWord8 $ fromIntegral $ word `shiftR` (i * 8) .&. 0xFF
 
 parseNodeId :: B8.ByteString -> NodeId
