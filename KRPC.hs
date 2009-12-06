@@ -2,18 +2,25 @@ module KRPC where
 
 import qualified Data.ByteString.Lazy.Char8 as B8
 import qualified Data.ByteString.Lazy as W8
+import qualified Data.ByteString as SW8
 import Data.LargeWord (Word160)
-import Data.Binary.Put
-import Data.Bits
-import Network.Socket (SockAddr)
+import Data.Binary.Get
+import Network.Socket (SockAddr(SockAddrInet))
 import Data.Maybe (fromMaybe)
 import Control.Monad
 
 import BEncoding
+import NodeId
+import IntBuf
 
 
 newtype T = T B8.ByteString
     deriving (Eq, Show, Ord)
+
+tSucc :: T -> T
+tSucc = mapT $ integerToBuf . (+ 1) . bufToInteger
+    where mapT f (T b) = T $ f b
+
 
 data Packet = QPacket T Query
             | RPacket T Reply
@@ -26,24 +33,21 @@ type Reply = BValue
 data Error = Error Integer B8.ByteString
            deriving (Show, Eq)
 
-newtype NodeId = NodeId Word160
-    deriving (Show, Eq)
-
 decodePacket :: B8.ByteString -> Packet
 decodePacket buf
-    = let BDict pkt = decode buf
+    = let pkt@(BDict _) = decode buf
           get k d = fromMaybe (error $ "No such key: " ++ k) $
-                    (BString $ B8.pack k) `lookup` d
-          getS k d = let BString v = get k d
+                    d `bdictLookup` k
+          getS k d = let Just (BString v) = d `bdictLookup` k
                      in B8.unpack v
           BString t = get "t" pkt
           y = getS "y" pkt
           q = getS "q" pkt
-          BDict a = get "a" pkt
+          a@(BDict _) = get "a" pkt
           BString aId' = get "id" a
-          aId = parseNodeId aId'
+          aId = makeNodeId aId'
           BString aTarget' = get "target" a
-          aTarget = parseNodeId aTarget'
+          aTarget = makeNodeId aTarget'
           r@(BDict _) = get "r" pkt
           BList [BInteger eN, BString eS] = get "e" pkt
       in case y of
@@ -57,46 +61,30 @@ decodePacket buf
 encodePacket :: Packet -> B8.ByteString
 encodePacket (QPacket (T t) qry)
     = let (q, a) = case qry of
-                     Ping nodeId ->
+                     Ping id ->
                          ("ping", BDict [(BString $ B8.pack "id",
-                                          BString $ serializeNodeId nodeId)])
-                     FindNode nodeId target ->
+                                          BString $ nodeIdToBuf id)])
+                     FindNode id target ->
                          ("find_node", BDict [(BString $ B8.pack "id",
-                                               BString $ serializeNodeId nodeId),
+                                               BString $ nodeIdToBuf id),
                                               (BString $ B8.pack "target",
-                                               BString $ serializeNodeId target)])
+                                               BString $ nodeIdToBuf target)])
       in encode $
          BDict [(BString $ B8.singleton 't', BString t),
                 (BString $ B8.singleton 'y', BString $ B8.singleton 'q'),
                 (BString $ B8.singleton 'q', BString $ B8.pack q),
                 (BString $ B8.singleton 'a', a)]
 
-serializeNodeId :: NodeId -> B8.ByteString
-serializeNodeId (NodeId word)
-    = runPut $
-      forM_ (reverse [0..19]) $ \i ->
-          putWord8 $ fromIntegral $ word `shiftR` (i * 8) .&. 0xFF
 
-parseNodeId :: B8.ByteString -> NodeId
-parseNodeId bs
-    | B8.length bs == 20
-    = NodeId $
-      fromIntegral $
-      W8.foldl (\r w8 ->
-                    (r `shiftL` 8) .|. w8
-               ) 0 bs
-                    
-tToInteger :: T -> Integer
-tToInteger (T t) = W8.foldl (\r w8 ->
-                                 (r `shiftL` 8) .|. fromIntegral w8
-                            ) 0 t
+decodeNodes :: W8.ByteString -> [(SockAddr, NodeId)]
+decodeNodes = let step = remaining >>= \remaining ->
+                         if remaining < 26
+                         then return []
+                         else
+                             do id <- NodeId `liftM` getBytes 20
+                                ip <- getWord32host
+                                port <- fromIntegral `liftM` getWord16be
+                                let addr = SockAddrInet port ip
+                                ((addr, id):) `liftM` step
+              in runGet step
 
-tFromInteger :: Integer -> T
-tFromInteger 0 = T W8.empty
-tFromInteger n = let T pre = tFromInteger (n `shiftR` 8)
-                 in T $
-                    pre `W8.append`
-                    W8.singleton (fromInteger n .&. 0xFF)
-
-tPlus :: T -> Integer -> T
-tPlus = flip $ \offset -> tFromInteger . (+ offset) . tToInteger

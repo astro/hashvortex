@@ -73,10 +73,10 @@ handlePacket st buf addr
                                        QPacket t _ -> (False, True, t)
          case (isReply, isQuery) of
            (True, _) ->
-               do case Map.lookup t $ queries of
-                    Just receiver ->
-                        do receiver pkt
-                           return st { stQueries = Map.delete t queries }
+               case Map.lookup t $ queries of
+                 Just receiver ->
+                     do receiver pkt
+                        return st { stQueries = Map.delete t queries }
            (False, True) ->
                return st
 
@@ -84,7 +84,7 @@ sendQuery :: SockAddr -> Query -> Node -> IO Packet
 sendQuery addr qry node
     = do chan <- newChan
          let recvReply = writeChan chan
-             send st = do let t = stLastT st `tPlus` 1
+             send st = do let t = tSucc $ stLastT st
                               buf = SB8.concat $ B8.toChunks $ encodePacket $ QPacket t qry
                           putStrLn $ "Sending " ++ show buf ++ " to " ++ show addr
                           sendTo (stSock st) buf addr

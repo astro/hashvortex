@@ -1,4 +1,4 @@
-module BEncoding (BValue(..), encode, decode, parseFile) where
+module BEncoding (BValue(..), encode, decode, parseFile, bdictLookup) where
 
 import qualified Data.ByteString.Lazy.Char8 as B8
 import qualified Data.ByteString.Lazy as W8
@@ -68,15 +68,18 @@ parseFile f = decode `liftM` B8.readFile f
 
 
 infoHash :: BValue -> SHA1.Word160
-infoHash (BDict dict) = let Just infoVal = lookup (BString $ B8.pack "info") dict
-                        in sha1 $ encode infoVal
+infoHash dict = let Just infoVal = dict `bdictLookup` "info"
+                in sha1 $ encode infoVal
     where sha1 = SHA1.hash . W8.unpack
+
+bdictLookup :: BValue -> String -> Maybe BValue
+bdictLookup (BDict dict) key = lookup (BString $ B8.pack key) dict
 
 {-
 instance Arbitrary Char where
   arbitrary = chr `fmap` oneof [choose (0,127), choose (0,255)]-}
 instance Arbitrary B8.ByteString where
-    arbitrary = B8.pack `liftM` arbitrary
+    arbitrary = B8.pack `fmap`  arbitrary
 instance Arbitrary BValue where
     arbitrary = frequency [(10, BInteger `liftM` arbitrary),
                            (5, resize 150 $ BString `liftM` arbitrary),
