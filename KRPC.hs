@@ -30,6 +30,9 @@ data Query = Ping NodeId
            | FindNode NodeId NodeId
            deriving (Show, Eq)
 type Reply = BValue
+{-data Reply = PingReply NodeId
+           | FindNodeReply NodeId [(NodeId, SockAddr)]
+           deriving (Show, Eq)-}
 data Error = Error Integer B8.ByteString
            deriving (Show, Eq)
 
@@ -74,6 +77,18 @@ encodePacket (QPacket (T t) qry)
                 (BString $ B8.singleton 'y', BString $ B8.singleton 'q'),
                 (BString $ B8.singleton 'q', BString $ B8.pack q),
                 (BString $ B8.singleton 'a', a)]
+encodePacket (RPacket (T t) reply)
+    = encode $
+      BDict [(BString $ B8.singleton 't', BString t),
+             (BString $ B8.singleton 'y', BString $ B8.singleton 'r'),
+             (BString $ B8.singleton 'r', reply)]
+encodePacket (EPacket (T t) (Error code msg))
+    = encode $
+      BDict [(BString $ B8.singleton 't', BString t),
+             (BString $ B8.singleton 'y', BString $ B8.singleton 'e'),
+             (BString $ B8.singleton 'e', BList [BInteger code,
+                                                 BString msg]
+             )]
 
 
 decodeNodes :: W8.ByteString -> [(SockAddr, NodeId)]

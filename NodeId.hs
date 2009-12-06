@@ -39,3 +39,6 @@ distanceOrder a b = let r 0 = 0
                         r n = 1 + r (n `shiftR` 1)
                     in r $ distance a b
 
+nodeIdPlus :: NodeId -> Integer -> NodeId
+nodeIdPlus (NodeId buf) off = NodeId $ integerToBuf $ bufToInteger buf + off
+

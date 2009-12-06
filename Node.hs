@@ -20,7 +20,7 @@ data NodeState = State { stSock :: Socket,
                          stQueries :: Map T (Packet -> IO ())
                        }
 type Node = MVar NodeState
-type QueryHandler = Query -> IO (Either Error Reply)
+type QueryHandler = SockAddr -> Query -> IO (Either Error Reply)
 
 class InState a where
     inState :: a -> Node -> IO ()
@@ -43,7 +43,7 @@ new port = do sock <- socket AF_INET Datagram defaultProtocol
                                 stQueries = Map.empty
                               }
 
-nullQueryHandler _ = return $ Left $ Error 201 $ B8.pack "Not implemented"
+nullQueryHandler _ _ = return $ Left $ Error 201 $ B8.pack "Not implemented"
 
 setQueryHandler :: QueryHandler -> Node -> IO ()
 setQueryHandler cb = inState $ \st -> st { stQueryHandler = cb }
@@ -63,10 +63,9 @@ runOnce node = do sock <- withMVar node $ return . stSock
 
 handlePacket :: NodeState -> B8.ByteString -> SockAddr -> IO NodeState
 handlePacket st buf addr
-    = do putStrLn $ "received " ++ (show $ B8.length buf) ++ " from " ++ show addr
-         let pkt = decodePacket buf
+    = do let pkt = decodePacket buf
              queries = stQueries st
-         putStrLn $ "pkt = " ++ show pkt
+         putStrLn $ "received " ++ show pkt ++ " from " ++ show addr
          let (isReply, isQuery, t) = case pkt of
                                        RPacket t _ -> (True, False, t)
                                        EPacket t _ -> (True, False, t)
@@ -78,15 +77,24 @@ handlePacket st buf addr
                      do receiver pkt
                         return st { stQueries = Map.delete t queries }
            (False, True) ->
-               return st
+               do let QPacket t qry = pkt
+                  qRes <- stQueryHandler st addr qry
+                  let pkt = case qRes of
+                              Left e -> EPacket t e
+                              Right r -> RPacket t r
+                      buf = SB8.concat $ B8.toChunks $ encodePacket pkt
+                  putStrLn $ "replying " ++ show pkt ++ " to " ++ show addr
+                  sendTo (stSock st) buf addr
+                  return st
 
 sendQuery :: SockAddr -> Query -> Node -> IO Packet
 sendQuery addr qry node
     = do chan <- newChan
          let recvReply = writeChan chan
              send st = do let t = tSucc $ stLastT st
-                              buf = SB8.concat $ B8.toChunks $ encodePacket $ QPacket t qry
-                          putStrLn $ "Sending " ++ show buf ++ " to " ++ show addr
+                              pkt = QPacket t qry
+                              buf = SB8.concat $ B8.toChunks $ encodePacket $ pkt
+                          putStrLn $ "Sending " ++ show pkt ++ " to " ++ show addr
                           sendTo (stSock st) buf addr
                           return st { stLastT = t,
                                       stQueries = Map.insert t recvReply $ stQueries st

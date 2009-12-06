@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleInstances, TypeSynonymInstances, UndecidableInstances #-}
 module BEncoding (BValue(..), encode, decode, parseFile, bdictLookup) where
 
 import qualified Data.ByteString.Lazy.Char8 as B8
@@ -7,13 +8,14 @@ import Data.Char (isDigit, chr)
 import Control.Monad
 import qualified Data.Digest.SHA1 as SHA1
 import Test.QuickCheck
+import Data.List (intersperse)
 
 
 data BValue = BInteger Integer
             | BString B8.ByteString
             | BList [BValue]
             | BDict [(BValue, BValue)]
-            deriving (Show, Eq, Ord)
+            deriving (Eq, Ord)
 
 encode :: BValue -> B8.ByteString
 encode (BInteger i) = B8.singleton 'i' `B8.append`
@@ -30,6 +32,17 @@ encode (BDict xs) = B8.singleton 'd' `B8.append`
                                         encode k `B8.append` encode v
                                    ) xs) `B8.append`
                     B8.singleton 'e'
+
+instance Show BValue where
+    show (BInteger i) = show i
+    show (BString s) = show $ B8.unpack s
+    show (BList l) = show l
+    show (BDict d) = "{ " ++
+                     (concat $
+                      intersperse ", " $
+                      map (\(k, v) -> show k ++ ": " ++ show v) d) ++
+                     " }"
+
 
 
 decode :: B8.ByteString -> BValue
