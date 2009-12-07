@@ -57,7 +57,7 @@ findNodeInterval = fromInteger 3600
 settle :: NodeId -> Node.Node -> Peers -> IO ()
 settle nodeId node peers = do mNextNode <- (withMVar peers $ nextNode node)
                               maybe (return ()) (goFindNode node peers) mNextNode
-                              threadDelay $ 500 * 1000
+                              threadDelay $ 500 * 1000 * 1000
                               settle nodeId node peers
 
 nextNode :: Node.Node -> [Peer] -> IO (Maybe Peer)
