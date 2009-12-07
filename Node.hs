@@ -76,6 +76,7 @@ handlePacket st buf addr
                  Just receiver ->
                      do receiver pkt
                         return st { stQueries = Map.delete t queries }
+                 Nothing -> return st
            (False, True) ->
                do let QPacket t qry = pkt
                   qRes <- stQueryHandler st addr qry
