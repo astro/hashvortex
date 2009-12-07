@@ -23,7 +23,7 @@ main = do peers <- newPeers
           -- Prepare bootstrap
           a:_ <- Node.getAddrs "router.bittorrent.com" "6881"
           nodeId <- makeRandomNodeId
-          modifyMVar_ peers $ return . ((Peer a nodeId Nothing):)
+          updatePeer peers $ Peer a nodeId Nothing
           
           -- Go!
           settle nodeId node peers
