@@ -28,6 +28,7 @@ data Packet = QPacket T Query
            deriving (Show, Eq)
 data Query = Ping NodeId
            | FindNode NodeId NodeId
+           | OtherQuery String BValue
            deriving (Show, Eq)
 type Reply = BValue
 {-data Reply = PingReply NodeId
@@ -58,6 +59,7 @@ decodePacket buf
                   case q of
                     "ping" -> Ping aId
                     "find_node" -> FindNode aId aTarget
+                    _ -> OtherQuery q a
            "r" -> RPacket (T t) r
            "e" -> EPacket (T t) $ Error eN eS
 
