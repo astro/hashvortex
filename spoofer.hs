@@ -14,10 +14,13 @@ import KRPC
 import NodeId
 import BEncoding
 import Peers
+import EventLog
 
-main = do peers <- newPeers
+
+main = do log <- newLog "spoofer.log"
+          peers <- newPeers
           node <- Node.new 9999
-          Node.setQueryHandler (handleQuery peers) node
+          Node.setQueryHandler (queryHandler peers log) node
           forkIO $ Node.run node
 
           -- Prepare bootstrap
@@ -28,35 +31,36 @@ main = do peers <- newPeers
           -- Go!
           settle nodeId node peers
 
-handleQuery peers addr (Ping nodeId)
-    = do updatePeer peers $ Peer { peerAddr = addr,
+queryHandler peers log addr query
+    = do log $ show query
+         {- updatePeer peers $ Peer { peerAddr = addr,
                                    peerId = nodeId,
                                    peerLastFindNode = Nothing
-                                 }
-         return $ Right $ BDict [(BString $ B8.pack "id", BString $ nodeIdToBuf $ nodeId `nodeIdPlus` 1)]
-handleQuery peers addr (FindNode nodeId _)
-    = do updatePeer peers $ Peer { peerAddr = addr,
-                                   peerId = nodeId,
-                                   peerLastFindNode = Nothing
-                                 }
-         return $ Right $ BDict [(BString $ B8.pack "id", BString $ nodeIdToBuf $ nodeId `nodeIdPlus` 1),
-                              (BString $ B8.pack "nodes", BString B8.empty)]
-handleQuery peers addr _
-    = return $ Left $ Error 204 $ B8.pack "Method Unknown"
+                                 } -}
+         return $ handleQuery query
+
+handleQuery (Ping nodeId)
+    = Right $ BDict [(BString $ B8.pack "id", BString $ nodeIdToBuf $ nodeId `nodeIdPlus` 1)]
+handleQuery (FindNode nodeId _)
+    = Right $ BDict [(BString $ B8.pack "id", BString $ nodeIdToBuf $ nodeId `nodeIdPlus` 1),
+                     (BString $ B8.pack "nodes", BString B8.empty)]
+handleQuery _
+    = Left $ Error 204 $ B8.pack "Method Unknown"
 
 settle :: NodeId -> Node.Node -> Peers -> IO ()
-settle nodeId node peers = do mNextNode <- nextPeer peers
-                              maybe (return ()) (goFindNode node peers) mNextNode
-                              threadDelay $ 500 * 1000 * 1000
-                              settle nodeId node peers
+settle nodeId node peers
+        = do mNextNode <- nextPeer peers
+             maybe (return ()) (goFindNode node peers) mNextNode
+             threadDelay $ 500 * 1000 * 1000
+             settle nodeId node peers
 
 
-goFindNode node peers peer = do now <- getPOSIXTime
-                                updatePeer peers  peer { peerLastFindNode = Just now }
-                                forkIO_ $
-                                  (findNode node (peerAddr peer) (peerId peer `nodeIdPlus` 1) >>=
-                                   mapM_ (updatePeer peers)
-                                  )
+goFindNode node peers peer
+    = do now <- getPOSIXTime
+         updatePeer peers  peer { peerLastFindNode = Just now }
+         forkIO_ (findNode node (peerAddr peer) (peerId peer `nodeIdPlus` 1) >>=
+                  mapM_ (updatePeer peers)
+                 )
     where forkIO_ f = forkIO f >> return ()
 
 
