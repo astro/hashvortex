@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE TypeSynonymInstances, BangPatterns #-}
 module Peers where
 
 import Control.Concurrent.MVar
@@ -49,8 +49,8 @@ nextPeer peers
           (>+) [] [] = Nothing
 
 updatePeer :: Peers -> Peer -> IO ()
-updatePeer peers peer = modifyMVar_ peers $
-                        return . Map.alter (-><- Just peer) addr
+updatePeer peers !peer = modifyMVar_ peers $
+                         return . Map.alter (-><- Just peer) addr
     where addr = peerAddr peer
 
 class Mergeable a where
