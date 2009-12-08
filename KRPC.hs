@@ -28,6 +28,8 @@ data Packet = QPacket T Query
            deriving (Show, Eq)
 data Query = Ping NodeId
            | FindNode NodeId NodeId
+           | GetPeers NodeId NodeId
+           | AnnouncePeer NodeId NodeId Integer B8.ByteString
            | OtherQuery String BValue
            deriving (Show, Eq)
 type Reply = BValue
@@ -48,20 +50,27 @@ decodePacket buf
           y = getS "y" pkt
           q = getS "q" pkt
           a@(BDict _) = get "a" pkt
-          BString aId' = get "id" a
-          aId = makeNodeId aId'
-          BString aTarget' = get "target" a
-          aTarget = makeNodeId aTarget'
           r@(BDict _) = get "r" pkt
           BList [BInteger eN, BString eS] = get "e" pkt
       in case y of
-           "q" -> QPacket (T t) $
-                  case q of
-                    "ping" -> Ping aId
-                    "find_node" -> FindNode aId aTarget
-                    _ -> OtherQuery q a
+           "q" -> QPacket (T t) $ decodeQuery q a
            "r" -> RPacket (T t) r
            "e" -> EPacket (T t) $ Error eN eS
+
+decodeQuery q a
+    = let getId k = let Just (BString s) = a `bdictLookup` k
+                    in makeNodeId s
+          aId = getId "id"
+          aTarget = getId "target"
+          aInfoHash = getId "info_hash"
+          Just (BInteger aPort) = a `bdictLookup` "port"
+          Just (BString aToken) = a `bdictLookup` "token"
+      in case q of
+           "ping" -> Ping aId
+           "find_node" -> FindNode aId aTarget
+           "get_peers" -> GetPeers aId aInfoHash
+           "announce_peer" -> AnnouncePeer aId aInfoHash aPort aToken
+           _ -> OtherQuery q a
 
 encodePacket :: Packet -> B8.ByteString
 encodePacket (QPacket (T t) qry)

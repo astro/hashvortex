@@ -44,6 +44,12 @@ handleQuery (Ping nodeId)
 handleQuery (FindNode nodeId _)
     = Right $ BDict [(BString $ B8.pack "id", BString $ nodeIdToBuf $ nodeId `nodeIdPlus` 1),
                      (BString $ B8.pack "nodes", BString B8.empty)]
+handleQuery (GetPeers nodeId infoHash)
+    = Right $ BDict [(BString $ B8.pack "id", BString $ nodeIdToBuf $ infoHash `nodeIdPlus` 1),
+                     (BString $ B8.pack "token", BString B8.empty),
+                     (BString $ B8.pack "values", BList [])]
+handleQuery (AnnouncePeer nodeId infoHash port token)
+    = Right $ BDict [(BString $ B8.pack "id", BString $ nodeIdToBuf $ infoHash `nodeIdPlus` 1)]
 handleQuery _
     = Left $ Error 204 $ B8.pack "Method Unknown"
 
