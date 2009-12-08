@@ -3,6 +3,7 @@ module EventLog (Logger, newLog) where
 import Control.Concurrent (forkIO)
 import Control.Concurrent.Chan
 import System.IO
+import Data.Time.Clock.POSIX (getPOSIXTime)
 
 
 type Logger = String -> IO ()
@@ -10,7 +11,8 @@ type Logger = String -> IO ()
 newLog :: FilePath -> IO Logger
 newLog logPath = do chan <- newChan
                     forkIO $ writer logPath chan
-                    let sender = writeChan chan
+                    let sender s = do now <- getPOSIXTime
+                                      writeChan chan (show now ++ " " ++ s)
                     return sender
 
 writer :: FilePath -> Chan String -> IO ()
