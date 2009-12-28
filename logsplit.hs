@@ -7,12 +7,14 @@ import Control.Monad
 import Data.Char (isDigit, isAlpha, isSpace)
 import Control.Monad.State.Lazy
 import System.Environment
+import Data.Set (Set)
+import qualified Data.Set as Set
 
 
 type Time = Double
 
 data EventStats = EventStats { esFile :: Handle,
-                               esTimes :: [Time],
+                               esTimes :: Set Time,
                                esNow :: Time
                              }
 type Stats = Map String EventStats
@@ -27,10 +29,12 @@ newEventStats
                (\name ->
                     do f <- openFile (name ++ ".data") WriteMode
                        return (name, EventStats { esFile = f,
-                                                  esTimes = [],
+                                                  esTimes = Set.empty,
                                                   esNow = 0
                                                 })
                )
+
+statsInterval = 1.0
 
 countEvent :: Stats -> Event -> IO Stats
 countEvent stats (Ev time name)
@@ -43,26 +47,25 @@ countEvent stats (Ev time name)
                return stats
     where updateStats :: StatsAction
           updateStats = do es <- get
-                           put $ es { esTimes = esTimes es ++ [time] }
+                           put $ es { esTimes = Set.insert time $ esTimes es }
                            writeData
           writeData :: StatsAction
           writeData = do now <- esNow `liftM` get
-                         when (now + 0.1 < time - 1.0) writeData'
+                         when (now + statsInterval < time - 1.0) writeData'
           writeData' = do dropUntilNow
                           es <- get
                           let now = esNow es
-                          eventCountNow <- length `liftM`
-                                           filter (\time ->
-                                                       time >= now - 0.5 && time < now + 0.5
-                                                  ) `liftM`
+                          eventCountNow <- Set.size `liftM`
+                                           (fst . Set.split (now + 0.5)) `liftM`
+                                           (snd . Set.split (now - 0.5)) `liftM`
                                            esTimes `liftM`
                                            get
                           liftIO $ hPutStrLn (esFile es) $ show now ++ " " ++ show eventCountNow
-                          put $ es { esNow = now + 0.1 }
+                          put $ es { esNow = now + statsInterval }
                           writeData
           dropUntilNow :: StatsAction
           dropUntilNow = do es <- get
-                            put $ es { esTimes = dropWhile (< ((esNow es) - 0.5)) (esTimes es) }
+                            put $ es { esTimes = snd $ Set.split ((esNow es) - 0.5) (esTimes es) }
 
 lineToEvent s = let (timeS, 's':' ':s') = break (not . (`elem` '.':['0'..'9'])) s
                     time = read timeS
