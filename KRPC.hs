@@ -5,6 +5,7 @@ import qualified Data.ByteString.Lazy as W8
 import qualified Data.ByteString as SW8
 import Data.LargeWord (Word160)
 import Data.Binary.Get
+import Data.Binary.Put
 import Network.Socket (SockAddr(SockAddrInet))
 import Data.Maybe (fromMaybe)
 import Control.Monad
@@ -114,3 +115,14 @@ decodeNodes = let step = remaining >>= \remaining ->
                                 ((addr, id):) `liftM` step
               in runGet step
 
+encodeNodes :: [(SockAddr, NodeId)] -> W8.ByteString
+encodeNodes = runPut . mapM_
+              (\(SockAddrInet port ip, nodeId) ->
+                   do putLazyByteString $ nodeIdToBuf nodeId
+                      putWord32host ip
+                      putWord16be $ fromIntegral port
+              )
+
+encodeAddr :: SockAddr -> W8.ByteString
+encodeAddr (SockAddrInet port ip) = runPut $ do putWord32host ip
+                                                putWord16be $ fromIntegral port
