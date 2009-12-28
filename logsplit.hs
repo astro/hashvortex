@@ -9,6 +9,7 @@ import Control.Monad.State.Lazy
 import System.Environment
 import Data.Set (Set)
 import qualified Data.Set as Set
+import qualified Data.ByteString.Lazy.Char8 as B8
 
 
 type Time = Double
@@ -67,9 +68,11 @@ countEvent stats (Ev time name)
           dropUntilNow = do es <- get
                             put $ es { esTimes = snd $ Set.split ((esNow es) - 0.5) (esTimes es) }
 
-lineToEvent s = let (timeS, 's':' ':s') = break (not . (`elem` '.':['0'..'9'])) s
-                    time = read timeS
-                    (name, _) = break (not . isAlpha) s'
+lineToEvent s = let (time', s') = B8.break (== 's') s
+                    time = read $ B8.unpack time'
+                    s'' = B8.drop 2 s'
+                    (name', _) = B8.break (== ' ') s''
+                    name = B8.unpack name'
                 in Ev time name
 
 relTime :: [Event] -> [Event]
@@ -83,7 +86,7 @@ main = do args <- getArgs
             [logPath] -> main' logPath
             _ -> putStrLn "Usage: ./logsplit spoofer.log"
 main' logPath
-    = do events <- (relTime . map lineToEvent . lines) `liftM`
-                   readFile logPath
+    = do events <- (relTime . map lineToEvent . B8.lines) `liftM`
+                   B8.readFile logPath
          stats <- newEventStats
          foldM_ countEvent stats events
