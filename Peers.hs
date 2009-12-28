@@ -19,7 +19,7 @@ data Peer = Peer { peerAddr :: SockAddr,
 type Peers = MVar (Map SockAddr Peer)
 
 instance Ord SockAddr where
-    compare (SockAddrInet ip1 port1) (SockAddrInet ip2 port2)
+    compare (SockAddrInet port1 ip1) (SockAddrInet port2 ip2)
         = case ip1 `compare` ip2 of
             EQ -> port1 `compare` port2
             r -> r
