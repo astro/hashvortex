@@ -45,11 +45,11 @@ instance Show BValue where
 
 
 
-decode :: B8.ByteString -> BValue
+decode :: B8.ByteString -> Either String BValue
 decode bs = case P.parse decoder bs of
-              (rest, Right a) | rest == B8.empty -> a
-              (rest, Right _) -> error $ "Rest: " ++ B8.unpack rest
-              (_, Left e) -> error $ "Parse: " ++ e
+              (rest, Right a) | rest == B8.empty -> Right a
+              (rest, Right _) -> Left $ "Rest: " ++ B8.unpack rest
+              (_, Left e) -> Left $ "Parse: " ++ e
 
 decoder :: Parser BValue
 decoder = do c1 <- P.anyChar
@@ -76,7 +76,7 @@ decoder = do c1 <- P.anyChar
                _ -> fail $ "unexpected type: " ++ show c1
 
 
-parseFile :: FilePath -> IO BValue
+parseFile :: FilePath -> IO (Either String BValue)
 parseFile f = decode `liftM` B8.readFile f
 
 
@@ -99,4 +99,4 @@ instance Arbitrary BValue where
                            (2, resize 5 $ BList `liftM` arbitrary),
                            (2, resize 5 $ BDict `liftM` arbitrary)]
 
-propEncodeDecode val = decode (encode val) == val
+propEncodeDecode val = decode (encode val) == Right val

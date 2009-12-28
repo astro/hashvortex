@@ -63,30 +63,34 @@ runOnce node = do sock <- withMVar node $ return . stSock
 
 handlePacket :: NodeState -> B8.ByteString -> SockAddr -> IO NodeState
 handlePacket st buf addr
-    = do let pkt = decodePacket buf
-             queries = stQueries st
-         putStrLn $ "received " ++ show pkt ++ " from " ++ show addr
-         let (isReply, isQuery, t) = case pkt of
-                                       RPacket t _ -> (True, False, t)
-                                       EPacket t _ -> (True, False, t)
-                                       QPacket t _ -> (False, True, t)
-         case (isReply, isQuery) of
-           (True, _) ->
-               case Map.lookup t $ queries of
-                 Just receiver ->
-                     do receiver pkt
-                        return st { stQueries = Map.delete t queries }
-                 Nothing -> return st
-           (False, True) ->
-               do let QPacket t qry = pkt
-                  qRes <- stQueryHandler st addr qry
-                  let pkt = case qRes of
-                              Left e -> EPacket t e
-                              Right r -> RPacket t r
-                      buf = SB8.concat $ B8.toChunks $ encodePacket pkt
-                  putStrLn $ "replying " ++ show pkt ++ " to " ++ show addr
-                  sendTo (stSock st) buf addr
-                  return st
+    = do let errorOrPkt = decodePacket buf
+         case errorOrPkt of
+           Right pkt ->
+               do let queries = stQueries st
+                  --putStrLn $ "received " ++ show pkt ++ " from " ++ show addr
+                  let (isReply, isQuery, t) = case pkt of
+                                                RPacket t _ -> (True, False, t)
+                                                EPacket t _ -> (True, False, t)
+                                                QPacket t _ -> (False, True, t)
+                  case (isReply, isQuery) of
+                    (True, _) ->
+                        case Map.lookup t $ queries of
+                          Just receiver ->
+                              do receiver pkt
+                                 return st { stQueries = Map.delete t queries }
+                          Nothing -> return st
+                    (False, True) ->
+                        do let QPacket t qry = pkt
+                           qRes <- stQueryHandler st addr qry
+                           let pkt = case qRes of
+                                       Left e -> EPacket t e
+                                       Right r -> RPacket t r
+                               buf = SB8.concat $ B8.toChunks $ encodePacket pkt
+                           --putStrLn $ "replying " ++ show pkt ++ " to " ++ show addr
+                           sendTo (stSock st) buf addr
+                           return st
+           Left e -> do --putStrLn e
+                        return st
 
 sendQuery :: SockAddr -> Query -> Node -> IO Packet
 sendQuery addr qry node

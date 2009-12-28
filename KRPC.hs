@@ -40,23 +40,27 @@ type Reply = BValue
 data Error = Error Integer B8.ByteString
            deriving (Show, Eq)
 
-decodePacket :: B8.ByteString -> Packet
+decodePacket :: B8.ByteString -> Either String Packet
 decodePacket buf
-    = let pkt@(BDict _) = decode buf
-          get k d = fromMaybe (error $ "No such key: " ++ k) $
-                    d `bdictLookup` k
-          getS k d = let Just (BString v) = d `bdictLookup` k
-                     in B8.unpack v
-          BString t = get "t" pkt
-          y = getS "y" pkt
-          q = getS "q" pkt
-          a@(BDict _) = get "a" pkt
-          r@(BDict _) = get "r" pkt
-          BList [BInteger eN, BString eS] = get "e" pkt
-      in case y of
-           "q" -> QPacket (T t) $ decodeQuery q a
-           "r" -> RPacket (T t) r
-           "e" -> EPacket (T t) $ Error eN eS
+    = case decode buf of
+        Right pkt@(BDict _) ->
+            fromMaybe (Left "Malformed packet") $
+            do BString t <- pkt `bdictLookup` "t"
+               BString y <- pkt `bdictLookup` "y"
+               case B8.unpack y of
+                 "q" ->
+                     do BString q <- pkt `bdictLookup` "q"
+                        let q' = B8.unpack q
+                        a@(BDict _) <- pkt `bdictLookup` "a"
+                        return $ Right $ QPacket (T t) $ decodeQuery q' a
+                 "r" ->
+                     do r@(BDict _) <- pkt `bdictLookup` "r"
+                        return $ Right $ RPacket (T t) r
+                 "e" ->
+                     do BList [BInteger eN, BString eS] <- pkt `bdictLookup` "e"
+                        return $ Right $ EPacket (T t) $ Error eN eS
+                 _ -> fail $ "Invalid packet type: " ++ (show y)
+        Left e -> Left $ "decode: " ++ e
 
 decodeQuery q a
     = let getId k = let Just (BString s) = a `bdictLookup` k
