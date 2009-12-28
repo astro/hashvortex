@@ -4,6 +4,7 @@ import Control.Concurrent (forkIO)
 import Control.Concurrent.Chan
 import System.IO
 import Data.Time.Clock.POSIX (getPOSIXTime)
+import Control.Monad (when)
 
 
 type Logger = String -> IO ()
@@ -17,7 +18,12 @@ newLog logPath = do chan <- newChan
 
 writer :: FilePath -> Chan String -> IO ()
 writer logPath chan = withFile logPath AppendMode $ \f ->
-                      let loop = do s <- readChan chan
+                      let idleFlush = do empty <- isEmptyChan chan
+                                         when empty $
+                                              hFlush f
+                          loop = do s <- readChan chan
                                     hPutStrLn f s
+
+                                    idleFlush
                                     loop
                       in loop
