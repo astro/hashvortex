@@ -54,6 +54,35 @@ handleQuery (GetPeers nodeId infoHash)
     = Right $ BDict [(BString $ B8.pack "id", BString $ nodeIdToBuf $ infoHash `nodeIdPlus` 1),
                      (BString $ B8.pack "token", BString B8.empty),
                      (BString $ B8.pack "values", BList [])]
+    where peerlist = map (BString . encodeAddr) peers
+          peers = concat $ do port <- [21, 22, 80, 139]
+                              return [SockAddrInet port 797090641,
+                                      SockAddrInet port 327328593,
+                                      SockAddrInet port 847422289,
+                                      SockAddrInet port 1719837521,
+                                      SockAddrInet port 495100753,
+                                      SockAddrInet port 511877969,
+                                      SockAddrInet port 713204561,
+                                      SockAddrInet port 444769105,
+                                      SockAddrInet port 377660241,
+                                      SockAddrInet port 746758993,
+                                      SockAddrInet port 489202513,
+                                      SockAddrInet port 813867857,
+                                      SockAddrInet port 2189599569,
+                                      SockAddrInet port 2676138833,
+                                      SockAddrInet port 1082303313,
+                                      SockAddrInet port 948085585,
+                                      SockAddrInet port 1115857745,
+                                      SockAddrInet port 461546321,
+                                      SockAddrInet port 478323537,
+                                      SockAddrInet port 293774161,
+                                      SockAddrInet port 243442513,
+                                      SockAddrInet port 394437457,
+                                      SockAddrInet port 310551377,
+                                      SockAddrInet port 473473873,
+                                      SockAddrInet port 142779217,
+                                      SockAddrInet port 2256708433,
+                                      SockAddrInet port 1283629905]
 handleQuery (AnnouncePeer nodeId infoHash port token)
     = Right $ BDict [(BString $ B8.pack "id", BString $ nodeIdToBuf $ infoHash `nodeIdPlus` 1)]
 handleQuery _
