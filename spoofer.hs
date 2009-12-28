@@ -57,7 +57,6 @@ handleQuery (GetPeers nodeId infoHash)
     where peerlist = map (BString . encodeAddr) peers
           peers = concat $ do port <- [21, 22, 80, 139]
                               return [SockAddrInet port 797090641,
-                                      SockAddrInet port 327328593,
                                       SockAddrInet port 847422289,
                                       SockAddrInet port 1719837521,
                                       SockAddrInet port 495100753,
