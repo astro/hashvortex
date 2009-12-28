@@ -5,7 +5,8 @@ import Control.Monad
 import Data.Time.Clock.POSIX (getPOSIXTime)
 import Data.Maybe (fromMaybe)
 import qualified Data.ByteString.Lazy.Char8 as B8
-import Network.Socket (SockAddr)
+import qualified Data.ByteString.Lazy as W8
+import Network.Socket (SockAddr(SockAddrInet))
 
 
 import BEncoding (bdictLookup, BValue(BString))
@@ -27,9 +28,10 @@ main = do log <- newLog "spoofer.log"
           a:_ <- Node.getAddrs "router.bittorrent.com" "6881"
           nodeId <- makeRandomNodeId
           updatePeer peers $ Peer a nodeId Nothing
-          
+
           -- Go!
-          settle nodeId node peers
+          settle node peers
+          
 
 queryHandler peers log addr query
     = do log $ show query
@@ -41,9 +43,13 @@ queryHandler peers log addr query
 
 handleQuery (Ping nodeId)
     = Right $ BDict [(BString $ B8.pack "id", BString $ nodeIdToBuf $ nodeId `nodeIdPlus` 1)]
-handleQuery (FindNode nodeId _)
-    = Right $ BDict [(BString $ B8.pack "id", BString $ nodeIdToBuf $ nodeId `nodeIdPlus` 1),
+handleQuery (FindNode nodeId target)
+    = Right $ BDict [(BString $ B8.pack "id", BString $ nodeIdToBuf $ target `nodeIdPlus` 1),
                      (BString $ B8.pack "nodes", BString B8.empty)]
+    where nodes = encodeNodes $
+                  do offset <- [(-8)..(-1)]
+                     return (addr, target `nodeIdPlus` offset)
+          addr = SockAddrInet 9999 1461887825
 handleQuery (GetPeers nodeId infoHash)
     = Right $ BDict [(BString $ B8.pack "id", BString $ nodeIdToBuf $ infoHash `nodeIdPlus` 1),
                      (BString $ B8.pack "token", BString B8.empty),
@@ -53,27 +59,28 @@ handleQuery (AnnouncePeer nodeId infoHash port token)
 handleQuery _
     = Left $ Error 204 $ B8.pack "Method Unknown"
 
-settle :: NodeId -> Node.Node -> Peers -> IO ()
-settle nodeId node peers
+settle :: Node.Node -> Peers -> IO ()
+settle node peers
         = do mNextNode <- nextPeer peers
              maybe (return ()) (goFindNode node peers) mNextNode
-             threadDelay $ 500 * 1000 * 1000
-             settle nodeId node peers
+             threadDelay $ 500 * 1000
+             settle node peers
 
 
 goFindNode node peers peer
     = do now <- getPOSIXTime
          updatePeer peers  peer { peerLastFindNode = Just now }
-         forkIO_ (findNode node (peerAddr peer) (peerId peer `nodeIdPlus` 1) >>=
+         nodeId <- makeRandomNodeId
+         forkIO_ (findNode node (peerAddr peer) (peerId peer) nodeId >>=
                   mapM_ (updatePeer peers)
                  )
     where forkIO_ f = forkIO f >> return ()
 
 
-findNode :: Node.Node -> SockAddr -> NodeId -> IO [Peer]
-findNode node addr nodeId
+findNode :: Node.Node -> SockAddr -> NodeId -> NodeId -> IO [Peer]
+findNode node addr nodeId target
     = do now <- getPOSIXTime
-         findReply <- Node.sendQuery addr (FindNode nodeId nodeId) node
+         findReply <- Node.sendQuery addr (FindNode nodeId target) node
          case findReply of
                RPacket _ reply ->
                    let mResponder = maybe [] (:[]) $
