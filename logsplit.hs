@@ -6,6 +6,7 @@ import qualified Data.Map as Map
 import Control.Monad
 import Data.Char (isDigit, isAlpha, isSpace)
 import Control.Monad.State.Lazy
+import System.Environment
 
 
 type Time = Double
@@ -74,6 +75,11 @@ relTime events@((Ev start _):_)
                Ev (time - start) name
           ) events
 
-main = do events <- relTime `liftM` map lineToEvent `liftM` lines `liftM` readFile "spoofer.log"
-          stats <- newEventStats
-          foldM_ countEvent stats events
+main = do args <- getArgs
+          case args of
+            [logPath] -> main' logPath
+            _ -> putStrLn "Usage: ./logsplit spoofer.log"
+main' logPath
+    = do events <- relTime `liftM` map lineToEvent `liftM` lines `liftM` readFile logPath
+         stats <- newEventStats
+         foldM_ countEvent stats events
