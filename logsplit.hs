@@ -83,6 +83,7 @@ main = do args <- getArgs
             [logPath] -> main' logPath
             _ -> putStrLn "Usage: ./logsplit spoofer.log"
 main' logPath
-    = do events <- relTime `liftM` map lineToEvent `liftM` lines `liftM` readFile logPath
+    = do events <- (relTime . map lineToEvent . lines) `liftM`
+                   readFile logPath
          stats <- newEventStats
          foldM_ countEvent stats events
