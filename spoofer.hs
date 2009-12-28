@@ -46,10 +46,11 @@ handleQuery (Ping nodeId)
 handleQuery (FindNode nodeId target)
     = Right $ BDict [(BString $ B8.pack "id", BString $ nodeIdToBuf $ target `nodeIdPlus` 1),
                      (BString $ B8.pack "nodes", BString B8.empty)]
-    where nodes = encodeNodes $
+    where nodes = encodeNodes []
+                  {- $
                   do offset <- [(-8)..(-1)]
                      return (addr, target `nodeIdPlus` offset)
-          addr = SockAddrInet 9999 1461887825
+          addr = SockAddrInet 9999 1461887825-}
 handleQuery (GetPeers nodeId infoHash)
     = Right $ BDict [(BString $ B8.pack "id", BString $ nodeIdToBuf $ infoHash `nodeIdPlus` 1),
                      (BString $ B8.pack "token", BString B8.empty),
