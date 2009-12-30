@@ -102,7 +102,9 @@ handlePacket st buf addr
                                        Right r -> RPacket t r
                                buf = SB8.concat $ B8.toChunks $ encodePacket pkt
                            --putStrLn $ "replying " ++ show pkt ++ " to " ++ show addr
-                           sendTo (stSock st) buf addr
+                           catch (sendTo (stSock st) buf addr >>
+                                  return ()
+                                 ) $ putStrLn . show
                            return st
            Left e -> do --putStrLn e
                         return st
@@ -129,7 +131,9 @@ sendQueryNoWait addr qry
              pkt = QPacket t qry
              buf = SB8.concat $ B8.toChunks $ encodePacket $ pkt
          putStrLn $ "Sending " ++ show pkt ++ " to " ++ show addr
-         sendTo (stSock st) buf addr
+         catch (sendTo (stSock st) buf addr >>
+                return ()
+               ) $ putStrLn . show
          return st { stLastT = t }
 
 getAddrs :: String -> String -> IO [SockAddr]
