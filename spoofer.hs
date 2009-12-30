@@ -46,10 +46,10 @@ main = do log <- newLog "spoofer.log"
           let loop = do nodeId <- makeRandomNodeId
                         atomically $ do
                           st <- readTVar tDigState
-                          case Seq.null (stFind st) && Map.null (stSeen st) of
+                          case Seq.null (stFind st) && Map.size (stSeen st) /= 1 of
                             True -> writeTVar tDigState $
                                     st { stTarget = nodeId,
-                                         stFind = stFind st |> (nodeId, entryAddr),
+                                         stFind = Seq.singleton (nodeId, entryAddr),
                                          stSeen = Map.empty
                                        }
                             False -> return ()
@@ -60,25 +60,17 @@ main = do log <- newLog "spoofer.log"
 dig :: TVar DigState -> IO ()
 dig tDigState = do next <- atomically $
                            do st <- readTVar tDigState
-                              case (Seq.null (stFind st), Map.null (stSeen st)) of
-                                (True, True) -> return Nothing
-                                (True, False) ->
-                                    do let (pingAddr, pingNodeId) = Map.elemAt 0 $ stSeen st
-                                           pingDest = (pingNodeId, pingAddr)
-                                           stSeen' = Map.deleteAt 0 $ stSeen st
-                                       writeTVar tDigState $ st { stSeen = stSeen' }
-                                       return $ Just $ Left (stNode st, pingDest)
+                              case Seq.null (stFind st) of
+                                True -> return Nothing
                                 _ ->
                                     let (stFind', stFind'') = Seq.splitAt 1 $ stFind st
                                     in case toList stFind' of
                                          [findDest] ->
                                              do writeTVar tDigState $ st { stFind = stFind'' }
-                                                return $ Just $ Right (stNode st, stTarget st, findDest)
+                                                return $ Just (stNode st, stTarget st, findDest)
                                          _ -> return Nothing
                    case next of
-                     Just (Left (node, (pingNodeId, pingAddr))) ->
-                         Node.sendQueryNoWait pingAddr (Ping $ pingNodeId `nodeIdPlus` 1) node
-                     Just (Right (node, target, (findNodeId, findAddr))) ->
+                     Just (node, target, (findNodeId, findAddr)) ->
                          Node.sendQueryNoWait findAddr (FindNode (findNodeId `nodeIdPlus` 1) target) node
                      Nothing ->
                          return ()
