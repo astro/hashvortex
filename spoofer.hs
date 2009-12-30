@@ -58,7 +58,6 @@ main = do log <- newLog "spoofer.log"
                         dig tDigState
                         loop
           catch loop $ putStrLn . show
-          putStrLn "QUIT"
 
 dig :: TVar DigState -> IO ()
 dig tDigState = do next <- atomically $
@@ -88,8 +87,7 @@ dig tDigState = do next <- atomically $
                    threadDelay $ 1000000 `div` 50
 
 replyHandler tDigState addr reply
-    = do putStrLn $ "reply: " ++ show reply
-         let replyFields = do BString nodeId' <- reply `bdictLookup` "id"
+    = do let replyFields = do BString nodeId' <- reply `bdictLookup` "id"
                               let nodeId = makeNodeId nodeId'
                               BString nodes' <- reply `bdictLookup` "nodes"
                               let nodes = decodeNodes nodes'
@@ -97,7 +95,6 @@ replyHandler tDigState addr reply
          case replyFields of
            Just (replyer, nodes) ->
                do let isKnown st (_, addr) = Map.member addr $ stSeen st
-                  putStrLn $ "nodes=" ++ show nodes
                   atomically $ do
                             st <- readTVar tDigState
                             st <- foldM (\st node@(nodeId, addr) ->
@@ -108,7 +105,7 @@ replyHandler tDigState addr reply
                                                                     }
                                         ) st nodes
                             writeTVar tDigState st
-           Nothing -> putStrLn "Invalid reply"
+           Nothing -> return ()
 
 queryHandler log addr query
     = do log $ show query

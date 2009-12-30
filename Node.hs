@@ -47,7 +47,6 @@ new port = do sock <- socket AF_INET Datagram defaultProtocol
                                         stQueries = Map.empty
                                       }
               me <- myThreadId
-              addMVarFinalizer node (putStrLn $ "FIN on " ++ show me)
               return node
 
 nullQueryHandler _ _ = return $ Left $ Error 201 $ B8.pack "Not implemented"
@@ -116,7 +115,7 @@ sendQuery addr qry node
              send st = do let t = tSucc $ stLastT st
                               pkt = QPacket t qry
                               buf = SB8.concat $ B8.toChunks $ encodePacket $ pkt
-                          putStrLn $ "Sending " ++ show pkt ++ " to " ++ show addr
+                          --putStrLn $ "Sending " ++ show pkt ++ " to " ++ show addr
                           sendTo (stSock st) buf addr
                           return st { stLastT = t,
                                       stQueries = Map.insert t recvReply $ stQueries st
@@ -130,7 +129,7 @@ sendQueryNoWait addr qry
       do let t = tSucc $ stLastT st
              pkt = QPacket t qry
              buf = SB8.concat $ B8.toChunks $ encodePacket $ pkt
-         putStrLn $ "Sending " ++ show pkt ++ " to " ++ show addr
+         --putStrLn $ "Sending " ++ show pkt ++ " to " ++ show addr
          catch (sendTo (stSock st) buf addr >>
                 return ()
                ) $ putStrLn . show
