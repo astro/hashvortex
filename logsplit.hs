@@ -36,6 +36,8 @@ newEventStats
                )
 
 statsInterval = 1.0
+flushEventStats :: Stats -> IO ()
+flushEventStats = mapM_ hFlush . map (esFile . snd) . Map.toList
 
 countEvent :: Stats -> Event -> IO Stats
 countEvent stats (Ev time name)
@@ -90,3 +92,4 @@ main' logPath
                    B8.readFile logPath
          stats <- newEventStats
          foldM_ countEvent stats events
+         flushEventStats stats
