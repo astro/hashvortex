@@ -1,7 +1,7 @@
 module Main where
 
 import Control.Concurrent
-import Control.Concurrent.MVar
+import Control.Concurrent.STM
 import Control.Monad
 import Data.Time.Clock.POSIX (getPOSIXTime)
 import Data.Maybe (fromMaybe)
@@ -12,6 +12,9 @@ import qualified Data.Sequence as Seq
 import Data.Sequence (Seq, (<|), (|>), (><))
 import Data.Foldable (toList, foldl)
 import Prelude hiding (foldl)
+import Data.Map (Map)
+import qualified Data.Map as Map
+
 
 
 import BEncoding (bdictLookup, BValue(BString))
@@ -25,66 +28,87 @@ import EventLog
 data DigState = DigState { stNode :: Node.Node,
                            stTarget :: NodeId,
                            stFind :: Seq (NodeId, SockAddr),
-                           stPing :: Seq (NodeId, SockAddr)
+                           stSeen :: Map SockAddr NodeId
                          }
 
 main = do log <- newLog "spoofer.log"
           node <- Node.new 9999
           nodeId <- makeRandomNodeId
-          mDigState <- newMVar $ DigState node nodeId Seq.empty Seq.empty
+          tDigState <- atomically $ newTVar $ DigState node nodeId Seq.empty Map.empty
           Node.setQueryHandler (queryHandler log) node
-          Node.setReplyHandler (replyHandler log mDigState) node
+          Node.setReplyHandler (replyHandler tDigState) node
           forkIO $ Node.run node
 
           -- Prepare bootstrap
           entryAddr:_ <- Node.getAddrs "router.bittorrent.com" "6881"
-
           -- Go!
-          let loop = do modifyMVar_ mDigState $ \st ->
-                            case (Seq.null $ stFind st, Seq.null $ stPing st) of
-                              true ->
-                                  do nodeId <- makeRandomNodeId
-                                     return $ st { stTarget = nodeId,
-                                                   stFind = stFind st |> (nodeId, entryAddr)
-                                                 }
-                              false -> return st
-                        dig mDigState
+          let loop = do nodeId <- makeRandomNodeId
+                        (findCnt, seenCnt) <-
+                            atomically $ do
+                              st <- readTVar tDigState
+                              case Seq.null (stFind st) && Map.null (stSeen st) of
+                                True -> writeTVar tDigState $
+                                        st { stTarget = nodeId,
+                                             stFind = stFind st |> (nodeId, entryAddr),
+                                             stSeen = Map.empty
+                                           }
+                                False -> return ()
+                              return (Seq.length $ stFind st, Map.size $ stSeen st)
+                        putStrLn $ show findCnt ++ " to find, " ++ show seenCnt ++ " seen"
+                        dig tDigState
                         loop
-          loop
+          catch loop $ putStrLn . show
+          putStrLn "QUIT"
 
-dig :: MVar DigState -> IO ()
-dig mDigState = do modifyMVar_ mDigState $ \st ->
-                       do let (stFind', stFind'') = Seq.splitAt 1 $ stFind st
-                          case toList stFind' of
-                            [(findNodeId, findAddr)] ->
-                                do Node.sendQueryNoWait findAddr (FindNode findNodeId (stTarget st)) (stNode st)
-                                   return $ st { stFind = stFind'',
-                                                 stPing = stPing st |> (findNodeId, findAddr)
-                                               }
-                            [] ->
-                                do let (stPing', stPing'') = Seq.splitAt 1 $ stPing st
-                                   case toList stPing' of
-                                     [(pingNodeId, pingAddr)] ->
-                                         do Node.sendQueryNoWait pingAddr (Ping pingNodeId) (stNode st)
-                                            return $ st { stFind = stFind'',
-                                                          stPing = stPing'' }
-                                     [] -> return st
-                   threadDelay $ 1000000 `div` 5
+dig :: TVar DigState -> IO ()
+dig tDigState = do next <- atomically $
+                           do st <- readTVar tDigState
+                              case (Seq.null (stFind st), Map.null (stSeen st)) of
+                                (True, True) -> return Nothing
+                                (True, False) ->
+                                    do let (pingAddr, pingNodeId) = Map.elemAt 0 $ stSeen st
+                                           pingDest = (pingNodeId, pingAddr)
+                                           stSeen' = Map.deleteAt 0 $ stSeen st
+                                       writeTVar tDigState $ st { stSeen = stSeen' }
+                                       return $ Just $ Left (stNode st, pingDest)
+                                _ ->
+                                    let (stFind', stFind'') = Seq.splitAt 1 $ stFind st
+                                    in case toList stFind' of
+                                         [findDest] ->
+                                             do writeTVar tDigState $ st { stFind = stFind'' }
+                                                return $ Just $ Right (stNode st, stTarget st, findDest)
+                                         _ -> return Nothing
+                   case next of
+                     Just (Left (node, (pingNodeId, pingAddr))) ->
+                         Node.sendQueryNoWait pingAddr (Ping $ pingNodeId `nodeIdPlus` 1) node
+                     Just (Right (node, target, (findNodeId, findAddr))) ->
+                         Node.sendQueryNoWait findAddr (FindNode (findNodeId `nodeIdPlus` 1) target) node
+                     Nothing ->
+                         return ()
+                   threadDelay $ 1000000 `div` 50
 
-replyHandler log mDigState addr reply
+replyHandler tDigState addr reply
     = do putStrLn $ "reply: " ++ show reply
-         let Just (BString nodeId') = reply `bdictLookup` "id"
-             nodeId = makeNodeId nodeId'
-             Just (BString nodes') = reply `bdictLookup` "nodes"
-             nodes = decodeNodes nodes'
-             isKnown st what = foldl (\t -> (t ||) . (what ==)) False (stFind st >< stPing st)
-         modifyMVar_ mDigState $ \st ->
-             foldM (\st what ->
-                        case isKnown st what of
-                          True -> return st
-                          False -> do putStrLn $ "Adding " ++ show what
-                                      return $ st { stFind = stFind st |> what }
-                   ) st $ (nodeId, addr):nodes
+         let replyFields = do BString nodeId' <- reply `bdictLookup` "id"
+                              let nodeId = makeNodeId nodeId'
+                              BString nodes' <- reply `bdictLookup` "nodes"
+                              let nodes = decodeNodes nodes'
+                              return ((nodeId, addr), nodes)
+         case replyFields of
+           Just (replyer, nodes) ->
+               do let isKnown st (_, addr) = Map.member addr $ stSeen st
+                  putStrLn $ "nodes=" ++ show nodes
+                  atomically $ do
+                            st <- readTVar tDigState
+                            st <- foldM (\st node@(nodeId, addr) ->
+                                             case isKnown st node of
+                                               True -> return st
+                                               False -> return $ st { stFind = stFind st |> node,
+                                                                      stSeen = Map.insert addr nodeId $ stSeen st
+                                                                    }
+                                        ) st nodes
+                            writeTVar tDigState st
+           Nothing -> putStrLn "Invalid reply"
 
 queryHandler log addr query
     = do log $ show query
@@ -136,3 +160,10 @@ handleQuery (AnnouncePeer nodeId infoHash port token)
     = Right $ BDict [(BString $ B8.pack "id", BString $ nodeIdToBuf $ infoHash `nodeIdPlus` 1)]
 handleQuery _
     = Left $ Error 204 $ B8.pack "Method Unknown"
+
+
+instance Ord SockAddr where
+    compare (SockAddrInet port1 ip1) (SockAddrInet port2 ip2)
+        | ip1 == ip2 = port1 `compare` port2
+        | otherwise = ip1 `compare` ip2
+

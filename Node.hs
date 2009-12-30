@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 module Node where
 
+import Control.Concurrent
 import Control.Concurrent.MVar
 import qualified Data.ByteString.Lazy.Char8 as B8
 import qualified Data.ByteString.Char8 as SB8
@@ -39,12 +40,15 @@ instance InState (NodeState -> NodeState) where
 new :: Int -> IO Node
 new port = do sock <- socket AF_INET Datagram defaultProtocol
               bindSocket sock (SockAddrInet (fromIntegral port) 0)
-              newMVar $ State { stSock = sock,
-                                stQueryHandler = nullQueryHandler,
-                                stReplyHandler = nullReplyHandler,
-                                stLastT = T B8.empty,
-                                stQueries = Map.empty
-                              }
+              node <- newMVar $ State { stSock = sock,
+                                        stQueryHandler = nullQueryHandler,
+                                        stReplyHandler = nullReplyHandler,
+                                        stLastT = T B8.empty,
+                                        stQueries = Map.empty
+                                      }
+              me <- myThreadId
+              addMVarFinalizer node (putStrLn $ "FIN on " ++ show me)
+              return node
 
 nullQueryHandler _ _ = return $ Left $ Error 201 $ B8.pack "Not implemented"
 nullReplyHandler _ _ = return ()
@@ -55,8 +59,8 @@ setReplyHandler :: ReplyHandler -> Node -> IO ()
 setReplyHandler cb = inState $ \st -> st { stReplyHandler = cb }
 
 run :: Node -> IO ()
-run node = runOnce node >>
-           run node
+run node = do runOnce node
+              run node
 
 runOnce :: Node -> IO ()
 runOnce node = do sock <- withMVar node $ return . stSock
@@ -86,7 +90,8 @@ handlePacket st buf addr
                                  return st { stQueries = Map.delete t queries }
                           Nothing -> case pkt of
                                        RPacket _ reply ->
-                                           do stReplyHandler st addr reply
+                                           do catch (stReplyHandler st addr reply) $
+                                                    putStrLn . show
                                               return st
                                        _ -> return st
                     (False, True) ->
