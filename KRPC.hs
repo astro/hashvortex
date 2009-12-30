@@ -107,7 +107,7 @@ encodePacket (EPacket (T t) (Error code msg))
              )]
 
 
-decodeNodes :: W8.ByteString -> [(SockAddr, NodeId)]
+decodeNodes :: W8.ByteString -> [(NodeId, SockAddr)]
 decodeNodes = let step = remaining >>= \remaining ->
                          if remaining < 26
                          then return []
@@ -116,7 +116,7 @@ decodeNodes = let step = remaining >>= \remaining ->
                                 ip <- getWord32host
                                 port <- fromIntegral `liftM` getWord16be
                                 let addr = SockAddrInet port ip
-                                ((addr, id):) `liftM` step
+                                ((id, addr):) `liftM` step
               in runGet step
 
 encodeNodes :: [(SockAddr, NodeId)] -> W8.ByteString

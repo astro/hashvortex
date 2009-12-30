@@ -16,11 +16,13 @@ import KRPC
 
 data NodeState = State { stSock :: Socket,
                          stQueryHandler :: QueryHandler,
+                         stReplyHandler :: ReplyHandler,
                          stLastT :: T,
                          stQueries :: Map T (Packet -> IO ())
                        }
 type Node = MVar NodeState
 type QueryHandler = SockAddr -> Query -> IO (Either Error Reply)
+type ReplyHandler = SockAddr -> Reply -> IO ()
 
 class InState a where
     inState :: a -> Node -> IO ()
@@ -39,14 +41,18 @@ new port = do sock <- socket AF_INET Datagram defaultProtocol
               bindSocket sock (SockAddrInet (fromIntegral port) 0)
               newMVar $ State { stSock = sock,
                                 stQueryHandler = nullQueryHandler,
+                                stReplyHandler = nullReplyHandler,
                                 stLastT = T B8.empty,
                                 stQueries = Map.empty
                               }
 
 nullQueryHandler _ _ = return $ Left $ Error 201 $ B8.pack "Not implemented"
+nullReplyHandler _ _ = return ()
 
 setQueryHandler :: QueryHandler -> Node -> IO ()
 setQueryHandler cb = inState $ \st -> st { stQueryHandler = cb }
+setReplyHandler :: ReplyHandler -> Node -> IO ()
+setReplyHandler cb = inState $ \st -> st { stReplyHandler = cb }
 
 run :: Node -> IO ()
 run node = runOnce node >>
@@ -74,11 +80,15 @@ handlePacket st buf addr
                                                 QPacket t _ -> (False, True, t)
                   case (isReply, isQuery) of
                     (True, _) ->
-                        case Map.lookup t $ queries of
+                        case Map.lookup t queries of
                           Just receiver ->
                               do receiver pkt
                                  return st { stQueries = Map.delete t queries }
-                          Nothing -> return st
+                          Nothing -> case pkt of
+                                       RPacket _ reply ->
+                                           do stReplyHandler st addr reply
+                                              return st
+                                       _ -> return st
                     (False, True) ->
                         do let QPacket t qry = pkt
                            qRes <- stQueryHandler st addr qry
@@ -106,6 +116,16 @@ sendQuery addr qry node
                                     }
          inState send node
          readChan chan
+
+sendQueryNoWait :: SockAddr -> Query -> Node -> IO ()
+sendQueryNoWait addr qry
+    = inState $ \st ->
+      do let t = tSucc $ stLastT st
+             pkt = QPacket t qry
+             buf = SB8.concat $ B8.toChunks $ encodePacket $ pkt
+         putStrLn $ "Sending " ++ show pkt ++ " to " ++ show addr
+         sendTo (stSock st) buf addr
+         return st { stLastT = t }
 
 getAddrs :: String -> String -> IO [SockAddr]
 getAddrs name serv = liftM (map addrAddress .
