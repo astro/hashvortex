@@ -38,23 +38,21 @@ main = do log <- newLog "spoofer.log"
           Node.setQueryHandler (queryHandler log) node
           Node.setReplyHandler (replyHandler tDigState) node
           forkIO $ Node.run node
+          forkIO $ statsLoop tDigState
 
           -- Prepare bootstrap
           entryAddr:_ <- Node.getAddrs "router.bittorrent.com" "6881"
           -- Go!
           let loop = do nodeId <- makeRandomNodeId
-                        (findCnt, seenCnt) <-
-                            atomically $ do
-                              st <- readTVar tDigState
-                              case Seq.null (stFind st) && Map.null (stSeen st) of
-                                True -> writeTVar tDigState $
-                                        st { stTarget = nodeId,
-                                             stFind = stFind st |> (nodeId, entryAddr),
-                                             stSeen = Map.empty
-                                           }
-                                False -> return ()
-                              return (Seq.length $ stFind st, Map.size $ stSeen st)
-                        putStrLn $ show findCnt ++ " to find, " ++ show seenCnt ++ " seen"
+                        atomically $ do
+                          st <- readTVar tDigState
+                          case Seq.null (stFind st) && Map.null (stSeen st) of
+                            True -> writeTVar tDigState $
+                                    st { stTarget = nodeId,
+                                         stFind = stFind st |> (nodeId, entryAddr),
+                                         stSeen = Map.empty
+                                       }
+                            False -> return ()
                         dig tDigState
                         loop
           catch loop $ putStrLn . show
@@ -85,6 +83,20 @@ dig tDigState = do next <- atomically $
                      Nothing ->
                          return ()
                    threadDelay $ 1000000 `div` 50
+
+statsLoop tDigState = do (findTarget,
+                          findCnt,
+                          seenCnt) <- atomically $ do
+                           st <- readTVar tDigState
+                           return (stTarget st,
+                                   Seq.length $ stFind st,
+                                   Map.size $ stSeen st)
+                         putStrLn $ "Find " ++ show findTarget ++
+                                  ": " ++ show seenCnt ++
+                                  " seen, " ++ show findCnt ++
+                                  " to query"
+                         threadDelay 1000000
+                         statsLoop tDigState
 
 replyHandler tDigState addr reply
     = do let replyFields = do BString nodeId' <- reply `bdictLookup` "id"
