@@ -33,7 +33,7 @@ data DigState = DigState { stNode :: Node.Node,
 
 maxCacheSize = 16
 
-main = do log <- newLog "spoofer.log"
+main = do log <- newLog "spoofer.data"
           node <- Node.new 9999
           nodeId <- makeRandomNodeId
           entryAddr:_ <- Node.getAddrs "router.bittorrent.com" "6881"
@@ -78,7 +78,7 @@ dig tDigState = do next <- atomically $
                          Node.sendQueryNoWait findAddr (FindNode (findNodeId `nodeIdPlus` 1) target) node
                      Nothing ->
                          return ()
-                   threadDelay $ 1000000 `div` 50
+                   threadDelay $ 1000000 `div` 200
 
 statsLoop tDigState = do (findTarget,
                           findCnt,
@@ -124,7 +124,7 @@ replyHandler tDigState addr reply
            Nothing -> return ()
 
 queryHandler log addr query
-    = do log $ show query
+    = do log query
          return $ handleQuery query
 
 handleQuery (Ping nodeId)
