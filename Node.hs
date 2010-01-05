@@ -103,7 +103,7 @@ handlePacket st buf addr
                            --putStrLn $ "replying " ++ show pkt ++ " to " ++ show addr
                            catch (sendTo (stSock st) buf addr >>
                                   return ()
-                                 ) $ putStrLn . show
+                                 ) $ \_ -> return ()
                            return st
            Left e -> do --putStrLn e
                         return st
@@ -115,8 +115,9 @@ sendQuery addr qry node
              send st = do let t = tSucc $ stLastT st
                               pkt = QPacket t qry
                               buf = SB8.concat $ B8.toChunks $ encodePacket $ pkt
-                          --putStrLn $ "Sending " ++ show pkt ++ " to " ++ show addr
-                          sendTo (stSock st) buf addr
+                          catch (sendTo (stSock st) buf addr >>
+			         return ()
+				) $ \a -> return ()
                           return st { stLastT = t,
                                       stQueries = Map.insert t recvReply $ stQueries st
                                     }
@@ -129,10 +130,9 @@ sendQueryNoWait addr qry
       do let t = tSucc $ stLastT st
              pkt = QPacket t qry
              buf = SB8.concat $ B8.toChunks $ encodePacket $ pkt
-         --putStrLn $ "Sending " ++ show pkt ++ " to " ++ show addr
          catch (sendTo (stSock st) buf addr >>
-                return ()
-               ) $ putStrLn . show
+	 	return ()
+	       ) $ \a -> return ()
          return st { stLastT = t }
 
 getAddrs :: String -> String -> IO [SockAddr]
