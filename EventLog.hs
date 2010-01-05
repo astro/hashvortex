@@ -19,8 +19,7 @@ data Event = Event { evTime :: POSIXTime,
                      evQuery :: String
                    }
              deriving (Eq, Ord)
-data LoggerState = State { stStart :: POSIXTime,
-                           stNow :: POSIXTime,
+data LoggerState = State { stNow :: POSIXTime,
                            stEvents :: Set Event
                          }
 
@@ -36,6 +35,7 @@ newLog :: FilePath -> IO Logger
 newLog logPath =
     do chan <- newChan
        forkIO $ writer logPath chan
+       start <- getPOSIXTime
        let sender query =
                do now <- getPOSIXTime
                   let q = case query of
@@ -43,7 +43,7 @@ newLog logPath =
                             FindNode _ _ -> "FindNode"
                             GetPeers _ _ -> "GetPeers"
                             AnnouncePeer _ _ _ _ -> "AnnouncePeer"
-                  writeChan chan $ Event now q
+                  writeChan chan $ Event (now - start) q
        return sender
 
 writer :: FilePath -> Chan Event -> IO ()
@@ -59,7 +59,7 @@ writer logPath chan = withFile logPath AppendMode $ \f ->
                                     liftIO idleFlush
                                     loop
                       in getPOSIXTime >>= \now ->
-                          evalStateT loop $ State now now Set.empty
+                          evalStateT loop $ State 0.0 Set.empty
 
 interval = 0.1
 
