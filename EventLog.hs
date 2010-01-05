@@ -5,8 +5,8 @@ import Control.Concurrent.Chan
 import System.IO
 import Data.Time.Clock.POSIX (getPOSIXTime, POSIXTime)
 import Control.Monad (when)
-import qualified Data.Sequence as Seq
-import Data.Sequence (Seq, (|>))
+import Data.Set (Set)
+import qualified Data.Set as Set
 import Control.Monad.State hiding (State)
 import Text.Printf (printf)
 import Data.List (intercalate)
@@ -18,9 +18,10 @@ type Logger = Query -> IO ()
 data Event = Event { evTime :: POSIXTime,
                      evQuery :: String
                    }
+             deriving (Eq, Ord)
 data LoggerState = State { stStart :: POSIXTime,
                            stNow :: POSIXTime,
-                           stEvents :: Seq Event
+                           stEvents :: Set Event
                          }
 
 type Data = [Int]
@@ -58,14 +59,14 @@ writer logPath chan = withFile logPath AppendMode $ \f ->
                                     liftIO idleFlush
                                     loop
                       in getPOSIXTime >>= \now ->
-                          evalStateT loop $ State now now Seq.empty
+                          evalStateT loop $ State now now Set.empty
 
 interval = 0.1
 
 updateEvents :: Event -> StateT LoggerState IO [TimeData]
 updateEvents event@(Event now _)
     = do st <- get
-         put $ st { stEvents = stEvents st |> event }
+         put $ st { stEvents = event `Set.insert` stEvents st }
 
          let datas = do st <- get
                         case stNow st + interval < now - 0.5 of
@@ -82,19 +83,19 @@ updateEvents event@(Event now _)
 dropUntilNow :: StateT LoggerState IO ()
 dropUntilNow = do st <- get
                   let now = stNow st
-                      events = Seq.dropWhileL (\(Event time _) ->
-                                                   time <= now - 0.5
-                                              ) $ stEvents st
+                      events = snd $
+                               Set.split (Event (now - 0.5) "") $
+                               stEvents st
                   put $ st { stEvents = events }
 
 countEvents :: StateT LoggerState IO Data
 countEvents = do st <- get
                  let now = stNow st
-                     events = Seq.dropWhileL (\(Event time _) ->
-                                                  time <= now + 0.5
-                                             ) $ stEvents st
-                     count s = Seq.length $
-                               Seq.filter (\event ->
+                     events = fst $
+                              Set.split (Event (now + 0.5) "") $
+                              stEvents st
+                     count s = Set.size $
+                               Set.filter (\event ->
                                                evQuery event == s
                                           ) events
                      data' = [count "Ping",
