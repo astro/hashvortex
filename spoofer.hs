@@ -27,29 +27,34 @@ import EventLog
 data DigState = DigState { stNode :: Node.Node,
                            stTarget :: NodeId,
                            stFind :: Seq (NodeId, SockAddr),
-                           stSeen :: Map SockAddr NodeId
+                           stSeen :: Map SockAddr NodeId,
+                           stCache :: Seq (NodeId, SockAddr)
                          }
+
+maxCacheSize = 16
 
 main = do log <- newLog "spoofer.log"
           node <- Node.new 9999
           nodeId <- makeRandomNodeId
-          tDigState <- atomically $ newTVar $ DigState node nodeId Seq.empty Map.empty
+          entryAddr:_ <- Node.getAddrs "router.bittorrent.com" "6881"
+          let entryCache = Seq.singleton (nodeId, entryAddr)
+          tDigState <- atomically $ newTVar $ DigState node nodeId Seq.empty Map.empty entryCache
           Node.setQueryHandler (queryHandler log) node
           Node.setReplyHandler (replyHandler tDigState) node
           forkIO $ Node.run node
           forkIO $ statsLoop tDigState
 
-          -- Prepare bootstrap
-          entryAddr:_ <- Node.getAddrs "router.bittorrent.com" "6881"
-          -- Go!
           let loop = do target <- makeRandomNodeId
 	  		atomically $ do
                           st <- readTVar tDigState
-                          case Seq.null (stFind st) && Map.size (stSeen st) /= 1 of
+                          case Seq.null (stFind st) &&
+                               not (Seq.null $ stCache st) &&
+                               Map.size (stSeen st) /= 1 of
                             True -> writeTVar tDigState $
                                     st { stTarget = target,
-                                         stFind = Seq.singleton (target, entryAddr),
-                                         stSeen = Map.empty
+                                         stFind = stCache st,
+                                         stSeen = Map.empty,
+                                         stCache = Seq.empty
                                        }
                             False -> return ()
                         dig tDigState
@@ -77,15 +82,18 @@ dig tDigState = do next <- atomically $
 
 statsLoop tDigState = do (findTarget,
                           findCnt,
-                          seenCnt) <- atomically $ do
+                          seenCnt,
+                          cacheCnt) <- atomically $ do
                            st <- readTVar tDigState
                            return (stTarget st,
                                    Seq.length $ stFind st,
-                                   Map.size $ stSeen st)
+                                   Map.size $ stSeen st,
+                                   Seq.length $ stCache st)
                          putStrLn $ "Find " ++ show findTarget ++
                                   ": " ++ show seenCnt ++
                                   " seen, " ++ show findCnt ++
-                                  " to query"
+                                  " to query, " ++ show cacheCnt ++
+                                  " cached"
                          threadDelay 1000000
                          statsLoop tDigState
 
@@ -102,10 +110,15 @@ replyHandler tDigState addr reply
                             st <- readTVar tDigState
                             st <- foldM (\st node@(nodeId, addr) ->
                                              case isKnown st node of
-                                               True -> return st
-                                               False -> return $ st { stFind = stFind st |> node,
-                                                                      stSeen = Map.insert addr nodeId $ stSeen st
-                                                                    }
+                                               True ->
+                                                   return st
+                                               False ->
+                                                   return $ st { stFind = stFind st |> node,
+                                                                 stSeen = Map.insert addr nodeId $ stSeen st,
+                                                                 stCache = if Seq.length (stCache st) < maxCacheSize
+                                                                           then stCache st |> node
+                                                                           else stCache st
+                                                               }
                                         ) st nodes
                             writeTVar tDigState st
            Nothing -> return ()
