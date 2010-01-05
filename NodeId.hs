@@ -25,7 +25,7 @@ makeRandomNodeId = (NodeId .
                     W8.pack .
                     take 20 .
                     map fromInteger .
-                    randomRs (0, 255)) `liftM` getStdGen
+                    randomRs (0, 255)) `liftM` newStdGen
 
 nodeIdToBuf :: NodeId -> LW8.ByteString
 nodeIdToBuf (NodeId bs) = LW8.fromChunks [bs]

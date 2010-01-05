@@ -14,7 +14,6 @@ import Data.Foldable (toList, foldl)
 import Prelude hiding (foldl)
 import Data.Map (Map)
 import qualified Data.Map as Map
-import System.IO.Unsafe (unsafeInterleaveIO)
 
 
 import BEncoding (bdictLookup, BValue(BString))
@@ -43,8 +42,8 @@ main = do log <- newLog "spoofer.log"
           -- Prepare bootstrap
           entryAddr:_ <- Node.getAddrs "router.bittorrent.com" "6881"
           -- Go!
-          let loop = do target <- unsafeInterleaveIO makeRandomNodeId
-                        atomically $ do
+          let loop = do target <- makeRandomNodeId
+	  		atomically $ do
                           st <- readTVar tDigState
                           case Seq.null (stFind st) && Map.size (stSeen st) /= 1 of
                             True -> writeTVar tDigState $
