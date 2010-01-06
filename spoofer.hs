@@ -14,6 +14,7 @@ import Data.Foldable (toList, foldl)
 import Prelude hiding (foldl)
 import Data.Map (Map)
 import qualified Data.Map as Map
+import Data.Time.Clock.POSIX (getPOSIXTime, POSIXTime)
 
 
 import BEncoding (bdictLookup, BValue(BString))
@@ -28,35 +29,46 @@ data DigState = DigState { stNode :: Node.Node,
                            stTarget :: NodeId,
                            stFind :: Seq (NodeId, SockAddr),
                            stSeen :: Map SockAddr NodeId,
-                           stCache :: Seq (NodeId, SockAddr)
+                           stCache :: Seq (NodeId, SockAddr),
+                           stLastReset :: POSIXTime
                          }
 
 maxCacheSize = 16
+minResetInterval = 2.0
 
 main = do log <- newLog "spoofer.data"
           node <- Node.new 9999
           nodeId <- makeRandomNodeId
+          now <- getPOSIXTime
           entryAddr:_ <- Node.getAddrs "router.bittorrent.com" "6881"
           let entryCache = Seq.singleton (nodeId, entryAddr)
-          tDigState <- atomically $ newTVar $ DigState node nodeId Seq.empty Map.empty entryCache
+          tDigState <- atomically $ newTVar $ DigState node nodeId Seq.empty Map.empty entryCache now
           Node.setQueryHandler (queryHandler log) node
           Node.setReplyHandler (replyHandler tDigState) node
           forkIO $ Node.run node
           forkIO $ statsLoop tDigState
 
-          let loop = do target <- makeRandomNodeId
-	  		atomically $ do
-                          st <- readTVar tDigState
-                          case Seq.null (stFind st) &&
-                               not (Seq.null $ stCache st) &&
-                               Map.size (stSeen st) /= 1 of
-                            True -> writeTVar tDigState $
-                                    st { stTarget = target,
-                                         stFind = stCache st,
-                                         stSeen = Map.empty,
-                                         stCache = Seq.empty
-                                       }
-                            False -> return ()
+          let loop = do now <- getPOSIXTime
+                        let shouldReset = do st <- readTVar tDigState
+                                             return $
+                                                    stLastReset st + minResetInterval <= now &&
+                                                    Seq.null (stFind st) &&
+                                                    not (Seq.null $ stCache st) &&
+                                                    Map.size (stSeen st) /= 1
+                        shouldReset' <- atomically shouldReset
+                        when shouldReset' $
+                             do target <- makeRandomNodeId
+                                atomically $
+                                           do shouldReset' <- shouldReset
+                                              when shouldReset' $
+                                                   do st <- readTVar tDigState
+                                                      writeTVar tDigState $
+                                                                st { stTarget = target,
+                                                                     stFind = stCache st,
+                                                                     stSeen = Map.empty,
+                                                                     stCache = Seq.empty,
+                                                                     stLastReset = now
+                                                                   }
                         dig tDigState
                         loop
           catch loop $ putStrLn . show
