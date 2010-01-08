@@ -3,7 +3,6 @@ module Main where
 import Control.Concurrent
 import Control.Concurrent.STM
 import Control.Monad
-import Data.Time.Clock.POSIX (getPOSIXTime)
 import Data.Maybe (fromMaybe)
 import qualified Data.ByteString.Lazy.Char8 as B8
 import qualified Data.ByteString.Lazy as W8
@@ -17,11 +16,10 @@ import qualified Data.Map as Map
 import Data.Time.Clock.POSIX (getPOSIXTime, POSIXTime)
 
 
-import BEncoding (bdictLookup, BValue(BString))
+import BEncoding (bdictLookup, BValue(BString, BDict, BList))
 import qualified Node
 import KRPC
 import NodeId
-import BEncoding
 import EventLog
 
 
@@ -73,20 +71,19 @@ main = do log <- newLog "spoofer.data"
                                                                    }
                         dig tDigState
                         loop
-          catch loop $ putStrLn . show
+          catch loop print
 
 dig :: TVar DigState -> IO ()
 dig tDigState = do next <- atomically $
-                           do st <- readTVar tDigState
-                              case Seq.null (stFind st) of
-                                True -> return Nothing
-                                _ ->
-                                    let (stFind', stFind'') = Seq.splitAt 1 $ stFind st
-                                    in case toList stFind' of
-                                         [findDest] ->
-                                             do writeTVar tDigState $ st { stFind = stFind'' }
-                                                return $ Just (stNode st, stTarget st, findDest)
-                                         _ -> return Nothing
+                           readTVar tDigState >>= \st ->
+                           if Seq.null $ stFind st
+                           then return Nothing
+                           else let (stFind', stFind'') = Seq.splitAt 1 $ stFind st
+                                in case toList stFind' of
+                                     [findDest] ->
+                                         do writeTVar tDigState $ st { stFind = stFind'' }
+                                            return $ Just (stNode st, stTarget st, findDest)
+                                     _ -> return Nothing
                    case next of
                      Just (node, target, (findNodeId, findAddr)) ->
                          do Node.sendQueryNoWait findAddr (FindNode (findNodeId `nodeIdPlus` 1) target) node
@@ -124,16 +121,14 @@ replyHandler tDigState addr reply
                   atomically $ do
                             st <- readTVar tDigState
                             st <- foldM (\st node@(nodeId, addr) ->
-                                             case isKnown st node of
-                                               True ->
-                                                   return st
-                                               False ->
-                                                   return $ st { stFind = stFind st |> node,
-                                                                 stSeen = Map.insert addr nodeId $ stSeen st,
-                                                                 stCache = if Seq.length (stCache st) < maxCacheSize
-                                                                           then stCache st |> node
-                                                                           else stCache st
-                                                               }
+                                             if isKnown st node
+                                             then return st
+                                             else return $ st { stFind = stFind st |> node,
+                                                                stSeen = Map.insert addr nodeId $ stSeen st,
+                                                                stCache = if Seq.length (stCache st) < maxCacheSize
+                                                                          then stCache st |> node
+                                                                          else stCache st
+                                                              }
                                         ) st nodes
                             writeTVar tDigState st
            Nothing -> return ()

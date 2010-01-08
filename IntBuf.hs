@@ -24,5 +24,5 @@ instance IntBuffer L.ByteString where
                      L.singleton (fromInteger n .&. 0xFF)
 
 
-prop_reflexive1 bs = bs == (integerToBuf $ bufToInteger bs)
-prop_reflexive2 n = n == (bufToInteger (integerToBuf n :: L.ByteString))
+prop_reflexive1 bs = bs == integerToBuf (bufToInteger bs)
+prop_reflexive2 n = n == bufToInteger (integerToBuf n :: L.ByteString)

@@ -19,9 +19,9 @@ data BValue = BInteger Integer
 
 encode :: BValue -> B8.ByteString
 encode (BInteger i) = B8.singleton 'i' `B8.append`
-                      (B8.pack $ show i) `B8.append`
+                      B8.pack (show i) `B8.append`
                       B8.singleton 'e'
-encode (BString s) = (B8.pack $ show $ B8.length s) `B8.append`
+encode (BString s) = B8.pack (show $ B8.length s) `B8.append`
                      B8.singleton ':' `B8.append`
                      s
 encode (BList xs) = B8.singleton 'l' `B8.append`
@@ -37,10 +37,9 @@ instance Show BValue where
     show (BInteger i) = show i
     show (BString s) = show $ B8.unpack s
     show (BList l) = show l
-    show (BDict d) = "{ " ++
-                     (concat $
-                      intersperse ", " $
-                      map (\(k, v) -> show k ++ ": " ++ show v) d) ++
+    show (BDict d) = "{ " ++ concat (intersperse ", " $
+                                     map (\(k, v) -> show k ++ ": " ++ show v) d
+                                    ) ++
                      " }"
 
 
@@ -60,19 +59,19 @@ decoder = do c1 <- P.anyChar
                         let Just (i, _) = B8.readInteger iS
                         return $ BInteger i
                d | isDigit d ->
-                     do lS <- (B8.cons d) `liftM` P.takeWhile isDigit
+                     do lS <- B8.cons d `liftM` P.takeWhile isDigit
                         P.char ':'
                         let Just (l, _) = B8.readInteger lS
-                        s <- (B8.take $ fromIntegral l) `liftM` getInput
-                        forM_ [1..l] $ \_ -> P.anyChar
+                        s <- B8.take (fromIntegral l) `liftM` getInput
+                        forM_ [1..l] $ const P.anyChar
                         return $ BString s
                'l' ->
-                     do BList `liftM` (P.manyTill decoder $ char 'e')
+                     BList `liftM` P.manyTill decoder (char 'e')
                'd' ->
-                     do BDict `liftM` (P.manyTill (do k <- decoder
-                                                      v <- decoder
-                                                      return (k, v)
-                                                  ) $ char 'e')
+                     BDict `liftM` P.manyTill (do k <- decoder
+                                                  v <- decoder
+                                                  return (k, v)
+                                              ) (char 'e')
                _ -> fail $ "unexpected type: " ++ show c1
 
 

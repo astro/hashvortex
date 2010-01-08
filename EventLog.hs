@@ -28,7 +28,7 @@ data TimeData = TimeData POSIXTime Data
 instance Show TimeData where
     show (TimeData time datas)
         = intercalate " " $
-          (printf "%.2f " (realToFrac time :: Double)):(map show datas)
+          printf "%.2f " (realToFrac time :: Double):map show datas
 
 
 newLog :: FilePath -> IO Logger
@@ -66,18 +66,16 @@ updateEvents event@(Event now _)
     = do st <- get
          put $ st { stEvents = event `Set.insert` stEvents st }
 
-         let datas = do st <- get
-                        case stNow st + interval < now - 0.5 of
-                          True ->
-                              do dropUntilNow
-                                 data' <- (TimeData now) `liftM` countEvents
-
-                                 st <- get
-                                 put $ st { stNow = stNow st + interval }
-
-                                 liftM (data':) datas
-                          False ->
-                              return []
+         let datas = get >>= \st ->
+                     if stNow st + interval < now - 0.5
+                     then do dropUntilNow
+                             data' <- TimeData now `liftM` countEvents
+                                    
+                             st <- get
+                             put $ st { stNow = stNow st + interval }
+                                  
+                             liftM (data':) datas
+                     else return []
          datas
 
 dropUntilNow :: StateT LoggerState IO ()

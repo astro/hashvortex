@@ -40,12 +40,12 @@ instance InState (NodeState -> NodeState) where
 new :: Int -> IO Node
 new port = do sock <- socket AF_INET Datagram defaultProtocol
               bindSocket sock (SockAddrInet (fromIntegral port) 0)
-              node <- newMVar $ State { stSock = sock,
-                                        stQueryHandler = nullQueryHandler,
-                                        stReplyHandler = nullReplyHandler,
-                                        stLastT = T B8.empty,
-                                        stQueries = Map.empty
-                                      }
+              node <- newMVar State { stSock = sock,
+                                      stQueryHandler = nullQueryHandler,
+                                      stReplyHandler = nullReplyHandler,
+                                      stLastT = T B8.empty,
+                                      stQueries = Map.empty
+                                    }
               me <- myThreadId
               return node
 
@@ -89,8 +89,7 @@ handlePacket st buf addr
                                  return st { stQueries = Map.delete t queries }
                           Nothing -> case pkt of
                                        RPacket _ reply ->
-                                           do catch (stReplyHandler st addr reply) $
-                                                    putStrLn . show
+                                           do catch (stReplyHandler st addr reply) print
                                               return st
                                        _ -> return st
                     (False, True) ->
@@ -114,7 +113,7 @@ sendQuery addr qry node
          let recvReply = writeChan chan
              send st = do let t = tSucc $ stLastT st
                               pkt = QPacket t qry
-                              buf = SB8.concat $ B8.toChunks $ encodePacket $ pkt
+                              buf = SB8.concat $ B8.toChunks $ encodePacket pkt
                           catch (sendTo (stSock st) buf addr >>
 			         return ()
 				) $ \a -> return ()
@@ -129,7 +128,7 @@ sendQueryNoWait addr qry
     = inState $ \st ->
       do let t = tSucc $ stLastT st
              pkt = QPacket t qry
-             buf = SB8.concat $ B8.toChunks $ encodePacket $ pkt
+             buf = SB8.concat $ B8.toChunks $ encodePacket pkt
          catch (sendTo (stSock st) buf addr >>
 	 	return ()
 	       ) $ \a -> return ()

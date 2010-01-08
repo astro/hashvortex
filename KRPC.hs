@@ -59,7 +59,7 @@ decodePacket buf
                  "e" ->
                      do BList [BInteger eN, BString eS] <- pkt `bdictLookup` "e"
                         return $ Right $ EPacket (T t) $ Error eN eS
-                 _ -> fail $ "Invalid packet type: " ++ (show y)
+                 _ -> fail $ "Invalid packet type: " ++ show y
         Left e -> Left $ "decode: " ++ e
 
 decodeQuery q a
