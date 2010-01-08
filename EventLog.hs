@@ -47,7 +47,7 @@ newLog logPath =
        return sender
 
 writer :: FilePath -> Chan Event -> IO ()
-writer logPath chan = withFile logPath AppendMode $ \f ->
+writer logPath chan = withFile logPath WriteMode $ \f ->
                       let idleFlush = do empty <- isEmptyChan chan
                                          when empty $
                                               hFlush f
