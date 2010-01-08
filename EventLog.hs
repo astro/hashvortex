@@ -36,15 +36,14 @@ newLog logPath =
     do chan <- newChan
        forkIO $ writer logPath chan
        start <- getPOSIXTime
-       let sender query =
-               do now <- getPOSIXTime
-                  let q = case query of
-                            Ping _ -> "Ping"
-                            FindNode _ _ -> "FindNode"
-                            GetPeers _ _ -> "GetPeers"
-                            AnnouncePeer _ _ _ _ -> "AnnouncePeer"
-                  writeChan chan $ Event (now - start) q
-       return sender
+       return $ \query ->
+           do now <- getPOSIXTime
+              let q = case query of
+                        Ping _ -> "Ping"
+                        FindNode _ _ -> "FindNode"
+                        GetPeers _ _ -> "GetPeers"
+                        AnnouncePeer _ _ _ _ -> "AnnouncePeer"
+              writeChan chan $ Event (now - start) q
 
 writer :: FilePath -> Chan Event -> IO ()
 writer logPath chan = withFile logPath WriteMode $ \f ->
