@@ -35,6 +35,8 @@ data DigState = DigState { stNode :: Node.Node,
 
 maxCacheSize = 16
 minResetInterval = 2.0
+packetRate = 200
+idleSleep = 1.0
 
 main = do log <- newLog "spoofer.data"
           node <- Node.new 9999
@@ -87,10 +89,11 @@ dig tDigState = do next <- atomically $
                                          _ -> return Nothing
                    case next of
                      Just (node, target, (findNodeId, findAddr)) ->
-                         Node.sendQueryNoWait findAddr (FindNode (findNodeId `nodeIdPlus` 1) target) node
+                         do Node.sendQueryNoWait findAddr (FindNode (findNodeId `nodeIdPlus` 1) target) node
+                            threadDelay $ 1000000 `div` packetRate
                      Nothing ->
-                         return ()
-                   threadDelay $ 1000000 `div` 200
+                         do threadDelay $ truncate $ idleSleep * 1000000
+                            return ()
 
 statsLoop tDigState = do (findTarget,
                           findCnt,
