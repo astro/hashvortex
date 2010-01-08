@@ -71,9 +71,11 @@ updateEvents event@(Event now _)
                           True ->
                               do dropUntilNow
                                  data' <- (TimeData now) `liftM` countEvents
-                                 liftM (data':) $
-                                       do put $ st { stNow = stNow st + interval }
-                                          datas
+
+                                 st <- get
+                                 put $ st { stNow = stNow st + interval }
+
+                                 liftM (data':) datas
                           False ->
                               return []
          datas
