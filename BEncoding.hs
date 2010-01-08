@@ -8,7 +8,7 @@ import Data.Char (isDigit, chr)
 import Control.Monad
 import qualified Data.Digest.SHA1 as SHA1
 import Test.QuickCheck
-import Data.List (intersperse)
+import Data.List (intercalate)
 
 
 data BValue = BInteger Integer
@@ -37,9 +37,9 @@ instance Show BValue where
     show (BInteger i) = show i
     show (BString s) = show $ B8.unpack s
     show (BList l) = show l
-    show (BDict d) = "{ " ++ concat (intersperse ", " $
-                                     map (\(k, v) -> show k ++ ": " ++ show v) d
-                                    ) ++
+    show (BDict d) = "{ " ++ (intercalate ", " $
+                              map (\(k, v) -> show k ++ ": " ++ show v) d
+                             ) ++
                      " }"
 
 
