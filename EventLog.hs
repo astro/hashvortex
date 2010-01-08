@@ -58,8 +58,7 @@ writer logPath chan = withFile logPath AppendMode $ \f ->
                                            hPutStrLn f . show
                                     liftIO idleFlush
                                     loop
-                      in getPOSIXTime >>= \now ->
-                          evalStateT loop $ State 0.0 Set.empty
+                      in evalStateT loop $ State 0.0 Set.empty
 
 interval = 0.1
 
