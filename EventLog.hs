@@ -48,17 +48,14 @@ writer :: FilePath -> Chan Event -> IO ()
 writer logPath chan
     = do start <- getPOSIXTime
          withFile logPath WriteMode $ \f ->
-             let idleFlush = do empty <- isEmptyChan chan
-                                when empty $
-                                     hFlush f
-                 loop = do event <- liftIO $ readChan chan
-                           datas <- updateEvents event
-                           liftIO $
-                                  forM_ datas $
-                                  hPutStrLn f . show
-                           liftIO idleFlush
-                           loop
-             in evalStateT loop $ State (start - 1.0) Set.empty
+             do hSetBuffering f LineBuffering
+                let loop = do event <- liftIO $ readChan chan
+                              datas <- updateEvents event
+                              liftIO $
+                                     forM_ datas $
+                                     hPutStrLn f . show
+                              loop
+                evalStateT loop $ State (start - 1.0) Set.empty
 
 interval = 0.1
 
