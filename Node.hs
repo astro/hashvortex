@@ -64,13 +64,13 @@ run node = do runOnce node
 runOnce :: Node -> IO ()
 runOnce node = do sock <- withMVar node $ return . stSock
                   (buf, addr) <- recvFrom sock 65535
-                  let handle st = catch (handlePacket st (B8.fromChunks [buf]) addr) $ \e ->
+                  let handle st = catch (handlePacket st buf addr) $ \e ->
                                   do putStrLn $ "Error handling packet: " ++ show e
                                      return st
                   inState handle node
 
 
-handlePacket :: NodeState -> B8.ByteString -> SockAddr -> IO NodeState
+handlePacket :: NodeState -> SB8.ByteString -> SockAddr -> IO NodeState
 handlePacket st buf addr
     = do let errorOrPkt = decodePacket buf
          case errorOrPkt of

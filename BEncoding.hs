@@ -1,9 +1,9 @@
-{-# LANGUAGE FlexibleInstances, TypeSynonymInstances, UndecidableInstances #-}
-module BEncoding (BValue(..), encode, decode, parseFile, bdictLookup) where
+module BEncoding (BValue(..), encode, decode, bdictLookup) where
 
 import qualified Data.ByteString.Lazy.Char8 as B8
 import qualified Data.ByteString.Lazy as W8
-import Data.Attoparsec.Char8 as P
+import qualified Data.ByteString.Char8 as SB8
+import Data.Binary.Strict.Get
 import Data.Char (isDigit, chr)
 import Control.Monad
 import qualified Data.Digest.SHA1 as SHA1
@@ -43,41 +43,59 @@ instance Show BValue where
                      " }"
 
 
+decode :: SB8.ByteString -> Either String BValue
+decode bs = case runGet decoder bs of
+              (Right a, _) -> Right a
+              (Left e, _) -> Left $ "Parse: " ++ e
 
-decode :: B8.ByteString -> Either String BValue
-decode bs = case P.parse decoder bs of
-              (rest, Right a) | rest == B8.empty -> Right a
-              (rest, Right _) -> Left $ "Rest: " ++ B8.unpack rest
-              (_, Left e) -> Left $ "Parse: " ++ e
-
-decoder :: Parser BValue
-decoder = do c1 <- P.anyChar
+decoder :: Get BValue
+decoder = do c1 <- getChar
              case c1 of
                'i' ->
-                     do iS <- P.takeWhile (\c -> c == '-' || isDigit c)
-                        P.char 'e'
-                        let Just (i, _) = B8.readInteger iS
+                     do iS <- takeWhile (\c -> c == '-' || isDigit c)
+                        char 'e'
+                        let Just (i, _) = SB8.readInteger iS
                         return $ BInteger i
                d | isDigit d ->
-                     do lS <- B8.cons d `liftM` P.takeWhile isDigit
-                        P.char ':'
-                        let Just (l, _) = B8.readInteger lS
-                        s <- B8.take (fromIntegral l) `liftM` getInput
-                        forM_ [1..l] $ const P.anyChar
-                        return $ BString s
+                     do lS <- SB8.cons d `liftM` takeWhile isDigit
+                        char ':'
+                        let Just (l, _) = SB8.readInteger lS
+                        s <- getByteString $ fromIntegral l
+                        return $ BString $ B8.fromChunks [s]
                'l' ->
-                     BList `liftM` P.manyTill decoder (char 'e')
+                     BList `liftM` manyTill decoder 'e'
                'd' ->
-                     BDict `liftM` P.manyTill (do k <- decoder
-                                                  v <- decoder
-                                                  return (k, v)
-                                              ) (char 'e')
+                     BDict `liftM` manyTill (do k <- decoder
+                                                v <- decoder
+                                                return (k, v)
+                                            ) 'e'
                _ -> fail $ "unexpected type: " ++ show c1
+    where getChar :: Get Char
+          getChar = (chr . fromIntegral) `liftM` getWord8
+          char :: Char -> Get ()
+          char c = getChar >>= \c' ->
+                   if c == c'
+                   then return ()
+                   else fail $ "Expected " ++ show c
+          takeWhile :: (Char -> Bool) -> Get SB8.ByteString
+          takeWhile p = do buf <- lookAhead $ remaining >>= getByteString
+                           let bufLen = SB8.length buf
+                               len = run 0
+                               run i | i >= bufLen = bufLen
+                                     | p (SB8.index buf i) = run $ i + 1
+                                     | otherwise = i
+                           getByteString len
+          manyTill :: Get a -> Char -> Get [a]
+          manyTill e c = getChar >>= \c' ->
+                         if c == c'
+                         then return []
+                         else do el <- e
+                                 (el:) `liftM` manyTill e c
 
-
+{-
 parseFile :: FilePath -> IO (Either String BValue)
 parseFile f = decode `liftM` B8.readFile f
-
+-}
 
 infoHash :: BValue -> SHA1.Word160
 infoHash dict = let Just infoVal = dict `bdictLookup` "info"
@@ -92,10 +110,12 @@ instance Arbitrary Char where
   arbitrary = chr `fmap` oneof [choose (0,127), choose (0,255)]-}
 instance Arbitrary B8.ByteString where
     arbitrary = B8.pack `fmap`  arbitrary
+instance Arbitrary SB8.ByteString where
+    arbitrary = SB8.pack `fmap`  arbitrary
 instance Arbitrary BValue where
     arbitrary = frequency [(10, BInteger `liftM` arbitrary),
                            (5, resize 150 $ BString `liftM` arbitrary),
                            (2, resize 5 $ BList `liftM` arbitrary),
                            (2, resize 5 $ BDict `liftM` arbitrary)]
 
-propEncodeDecode val = decode (encode val) == Right val
+propEncodeDecode val = decode (SB8.concat $ B8.toChunks $ encode val) == Right val

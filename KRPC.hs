@@ -40,7 +40,7 @@ type Reply = BValue
 data Error = Error Integer B8.ByteString
            deriving (Show, Eq)
 
-decodePacket :: B8.ByteString -> Either String Packet
+decodePacket :: SW8.ByteString -> Either String Packet
 decodePacket buf
     = case decode buf of
         Right pkt@(BDict _) ->
