@@ -76,7 +76,7 @@ decoder = do c1 <- getChar
           char c = getChar >>= \c' ->
                    if c == c'
                    then return ()
-                   else fail $ "Expected " ++ show c
+                   else fail $ "expected " ++ show c
           takeWhile :: (Char -> Bool) -> Get SB8.ByteString
           takeWhile p = do buf <- lookAhead $ remaining >>= getByteString
                            let bufLen = SB8.length buf
@@ -86,9 +86,9 @@ decoder = do c1 <- getChar
                                      | otherwise = i
                            getByteString len
           manyTill :: Get a -> Char -> Get [a]
-          manyTill e c = getChar >>= \c' ->
+          manyTill e c = lookAhead getChar >>= \c' ->
                          if c == c'
-                         then return []
+                         then getChar >> return []
                          else do el <- e
                                  (el:) `liftM` manyTill e c
 
