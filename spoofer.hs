@@ -43,7 +43,7 @@ main = do log <- newLog "spoofer.data"
           entryAddr:_ <- Node.getAddrs "router.bittorrent.com" "6881"
           let entryCache = Seq.singleton (nodeId, entryAddr)
           tDigState <- atomically $ newTVar $ DigState node nodeId Seq.empty Map.empty entryCache now
-          Node.setQueryHandler (queryHandler log) node
+          Node.setQueryHandler (queryHandler log tDigState) node
           Node.setReplyHandler (replyHandler tDigState) node
           forkIO $ Node.run node
           forkIO $ statsLoop tDigState
@@ -133,9 +133,19 @@ replyHandler tDigState addr reply
                             writeTVar tDigState st
            Nothing -> return ()
 
-queryHandler log addr query
+queryHandler log tDigState addr query
     = do log query
+         atomically $ do
+           st <- readTVar tDigState
+           when (Seq.length (stCache st) < maxCacheSize) $
+                writeTVar tDigState $ st { stCache = stCache st |> node }
          return $ handleQuery query
+    where node = (nodeId, addr)
+          nodeId = case query of
+                     Ping id -> id
+                     FindNode id _ -> id
+                     GetPeers id _ -> id
+                     AnnouncePeer id _ _ _ -> id
 
 handleQuery (Ping nodeId)
     = Right $ BDict [(BString $ B8.pack "id", BString $ nodeIdToBuf $ nodeId `nodeIdPlus` 1)]
