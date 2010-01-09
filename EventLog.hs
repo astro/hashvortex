@@ -35,7 +35,6 @@ newLog :: FilePath -> IO Logger
 newLog logPath =
     do chan <- newChan
        forkIO $ writer logPath chan
-       start <- getPOSIXTime
        return $ \query ->
            do now <- getPOSIXTime
               let q = case query of
@@ -43,21 +42,23 @@ newLog logPath =
                         FindNode _ _ -> "FindNode"
                         GetPeers _ _ -> "GetPeers"
                         AnnouncePeer _ _ _ _ -> "AnnouncePeer"
-              writeChan chan $ Event (now - start) q
+              writeChan chan $ Event now q
 
 writer :: FilePath -> Chan Event -> IO ()
-writer logPath chan = withFile logPath WriteMode $ \f ->
-                      let idleFlush = do empty <- isEmptyChan chan
-                                         when empty $
-                                              hFlush f
-                          loop = do event <- liftIO $ readChan chan
-                                    datas <- updateEvents event
-                                    liftIO $
-                                           forM_ datas $
-                                           hPutStrLn f . show
-                                    liftIO idleFlush
-                                    loop
-                      in evalStateT loop $ State 0.0 Set.empty
+writer logPath chan
+    = do start <- getPOSIXTime
+         withFile logPath WriteMode $ \f ->
+             let idleFlush = do empty <- isEmptyChan chan
+                                when empty $
+                                     hFlush f
+                 loop = do event <- liftIO $ readChan chan
+                           datas <- updateEvents event
+                           liftIO $
+                                  forM_ datas $
+                                  hPutStrLn f . show
+                           liftIO idleFlush
+                           loop
+             in evalStateT loop $ State (start - 1.0) Set.empty
 
 interval = 0.1
 
