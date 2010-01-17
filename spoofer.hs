@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -XNoBangPatterns #-}
 module Main where
 
 import Control.Concurrent
@@ -22,12 +23,13 @@ import KRPC
 import NodeId
 import EventLog
 
+data Peer = Peer {-# UNPACK #-} !NodeId !SockAddr
 
 data DigState = DigState { stNode :: Node.Node,
                            stTarget :: NodeId,
-                           stFind :: Seq (NodeId, SockAddr),
-                           stSeen :: Map SockAddr NodeId,
-                           stCache :: Seq (NodeId, SockAddr),
+                           stFind :: Seq Peer,
+                           stSeen :: Map SockAddr (),
+                           stCache :: Seq Peer,
                            stLastReset :: POSIXTime
                          }
 
@@ -41,7 +43,7 @@ main = do log <- newLog "spoofer.data"
           nodeId <- makeRandomNodeId
           now <- getPOSIXTime
           entryAddr:_ <- Node.getAddrs "router.bittorrent.com" "6881"
-          let entryCache = Seq.singleton (nodeId, entryAddr)
+          let entryCache = Seq.singleton $ Peer nodeId entryAddr
           tDigState <- atomically $ newTVar $ DigState node nodeId Seq.empty Map.empty entryCache now
           Node.setQueryHandler (queryHandler log tDigState) node
           Node.setReplyHandler (replyHandler tDigState) node
@@ -85,7 +87,7 @@ dig tDigState = do next <- atomically $
                                             return $ Just (stNode st, stTarget st, findDest)
                                      _ -> return Nothing
                    case next of
-                     Just (node, target, (findNodeId, findAddr)) ->
+                     Just (node, target, Peer findNodeId findAddr) ->
                          do Node.sendQueryNoWait findAddr (FindNode (findNodeId `nodeIdPlus` 1) target) node
                             threadDelay $ 1000000 `div` packetRate
                      Nothing ->
@@ -117,18 +119,19 @@ replyHandler tDigState addr reply
                               return ((nodeId, addr), nodes)
          case replyFields of
            Just (replyer, nodes) ->
-               do let isKnown st (_, addr) = Map.member addr $ stSeen st
+               do let isKnown st (Peer _ addr) = Map.member addr $ stSeen st
                   atomically $ do
                             st <- readTVar tDigState
-                            st <- foldM (\st node@(nodeId, addr) ->
-                                             if isKnown st node
-                                             then return st
-                                             else return $ st { stFind = stFind st |> node,
-                                                                stSeen = Map.insert addr nodeId $ stSeen st,
-                                                                stCache = if Seq.length (stCache st) < maxCacheSize
-                                                                          then stCache st |> node
-                                                                          else stCache st
-                                                              }
+                            st <- foldM (\st (nodeId, addr) ->
+                                             let peer = Peer nodeId addr
+                                             in if isKnown st peer
+                                                then return st
+                                                else return $ st { stFind = stFind st |> peer,
+                                                                   stSeen = Map.insert addr () $ stSeen st,
+                                                                   stCache = if Seq.length (stCache st) < maxCacheSize
+                                                                             then stCache st |> peer
+                                                                             else stCache st
+                                                                 }
                                         ) st nodes
                             writeTVar tDigState st
            Nothing -> return ()
@@ -138,9 +141,9 @@ queryHandler log tDigState addr query
          atomically $ do
            st <- readTVar tDigState
            when (Seq.length (stCache st) < maxCacheSize) $
-                writeTVar tDigState $ st { stCache = stCache st |> node }
+                writeTVar tDigState $ st { stCache = stCache st |> peer }
          return $ handleQuery query
-    where node = (nodeId, addr)
+    where peer = Peer nodeId addr
           nodeId = case query of
                      Ping id -> id
                      FindNode id _ -> id
