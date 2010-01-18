@@ -25,88 +25,105 @@ import EventLog
 
 data Peer = Peer {-# UNPACK #-} !NodeId !SockAddr
 
-data DigState = DigState { stNode :: Node.Node,
-                           stTarget :: NodeId,
-                           stFind :: Seq Peer,
+data DigState = DigState { -- |Network interface
+                           stNode :: Node.Node,
+                           stFindTarget :: NodeId,
+                           -- |To find by distance to stFindTarget
+                           stFind :: Map Integer Peer,
+                           -- |Limit iteration length
+                           stFindCount :: Int,
+                           -- |Don't query a node twice
                            stSeen :: Map SockAddr (),
-                           stCache :: Seq Peer,
-                           stLastReset :: POSIXTime
+                           -- |Start cache for next iteration
+                           stCache :: Seq Peer
                          }
 
+maxFindCount = 256
 maxCacheSize = 16
-minResetInterval = 2.0
-packetRate = 200
-idleSleep = 1.0
+packetRate = 20
+idleSleep = 0.1
 
 main = do log <- newLog "spoofer.data"
           node <- Node.new 9999
           nodeId <- makeRandomNodeId
           now <- getPOSIXTime
-          entryAddr:_ <- Node.getAddrs "router.bittorrent.com" "6881"
-          let entryCache = Seq.singleton $ Peer nodeId entryAddr
-          tDigState <- atomically $ newTVar $ DigState node nodeId Seq.empty Map.empty entryCache now
+          entryAddrs <- Node.getAddrs "router.bittorrent.com" "6881"
+          let entryCache = Seq.fromList [Peer nodeId entryAddr
+                                         | entryAddr <- entryAddrs]
+          tDigState <- atomically $ newTVar $
+                       DigState { stNode = node,
+                                  stFindTarget = nodeId,
+                                  stFind = Map.empty,
+                                  stFindCount = 0,
+                                  stSeen = Map.empty,
+                                  stCache = entryCache
+                                }
           Node.setQueryHandler (queryHandler log tDigState) node
           Node.setReplyHandler (replyHandler tDigState) node
           forkIO $ Node.run node
           forkIO $ statsLoop tDigState
 
-          let loop = do now <- getPOSIXTime
-                        let shouldReset = do st <- readTVar tDigState
-                                             return $
-                                                    stLastReset st + minResetInterval <= now &&
-                                                    Seq.null (stFind st) &&
-                                                    not (Seq.null $ stCache st) &&
-                                                    Map.size (stSeen st) /= 1
-                        shouldReset' <- atomically shouldReset
-                        when shouldReset' $
-                             do target <- makeRandomNodeId
-                                atomically $
-                                           do shouldReset' <- shouldReset
-                                              when shouldReset' $
-                                                   do st <- readTVar tDigState
-                                                      writeTVar tDigState $
-                                                                st { stTarget = target,
-                                                                     stFind = stCache st,
-                                                                     stSeen = Map.empty,
-                                                                     stCache = Seq.empty,
-                                                                     stLastReset = now
-                                                                   }
-                        dig tDigState
+          let loop = do dig tDigState
                         loop
           catch loop print
 
+resetDig :: TVar DigState -> IO (STM ())
+resetDig tDigState
+    = do nodeId <- makeRandomNodeId
+         return $
+                do st <- readTVar tDigState
+                   writeTVar tDigState $
+                             st { stFindTarget = nodeId,
+                                  stFind = Map.empty,
+                                  stFindCount = 0,
+                                  stSeen = Map.empty,
+                                  stCache = Seq.empty
+                                }
+                   mapM_ (insertCache tDigState) $ toList (stCache st)
+
 dig :: TVar DigState -> IO ()
-dig tDigState = do next <- atomically $
-                           readTVar tDigState >>= \st ->
-                           if Seq.null $ stFind st
-                           then return Nothing
-                           else let (stFind', stFind'') = Seq.splitAt 1 $ stFind st
-                                in case toList stFind' of
-                                     [findDest] ->
-                                         do writeTVar tDigState $ st { stFind = stFind'' }
-                                            return $ Just (stNode st, stTarget st, findDest)
-                                     _ -> return Nothing
+dig tDigState = do resetter <- resetDig tDigState
+                   let getNext =
+                           do st <- readTVar tDigState
+                              case (Map.null $ stFind st,
+                                    Seq.null $ stCache st,
+                                    Map.findMin $ stFind st) of
+                                (_, False, _) | stFindCount st >= maxFindCount ->
+                                      do resetter
+                                         getNext
+                                (True, _, _) ->
+                                    return Nothing
+                                (False, _, (_distance, peer)) ->
+                                    do writeTVar tDigState $
+                                                 st { stFind = Map.deleteMin $ stFind st,
+                                                      stFindCount = stFindCount st + 1
+                                                    }
+                                       return $ Just (stNode st, stFindTarget st, peer)
+                   next <- atomically getNext
                    case next of
                      Just (node, target, Peer findNodeId findAddr) ->
-                         do Node.sendQueryNoWait findAddr (FindNode (findNodeId `nodeIdPlus` 1) target) node
+                         do Node.sendQueryNoWait findAddr (FindNode target target) node
                             threadDelay $ 1000000 `div` packetRate
                      Nothing ->
                          do threadDelay $ truncate $ idleSleep * 1000000
                             return ()
 
 statsLoop tDigState = do (findTarget,
-                          findCnt,
-                          seenCnt,
-                          cacheCnt) <- atomically $ do
+                          findLen,
+                          findCount,
+                          seenLen,
+                          cacheLen) <- atomically $ do
                            st <- readTVar tDigState
-                           return (stTarget st,
-                                   Seq.length $ stFind st,
+                           return (stFindTarget st,
+                                   Map.size $ stFind st,
+                                   stFindCount st,
                                    Map.size $ stSeen st,
                                    Seq.length $ stCache st)
                          putStrLn $ "Find " ++ show findTarget ++
-                                  ": " ++ show seenCnt ++
-                                  " seen, " ++ show findCnt ++
-                                  " to query, " ++ show cacheCnt ++
+                                  ": " ++ show seenLen ++
+                                  " seen, " ++ show findCount ++
+                                  " queried, " ++ show findLen ++
+                                  " to query, " ++ show cacheLen ++
                                   " cached"
                          threadDelay 1000000
                          statsLoop tDigState
@@ -116,32 +133,44 @@ replyHandler tDigState addr reply
                               let nodeId = makeNodeId nodeId'
                               BString nodes' <- reply `bdictLookup` "nodes"
                               let nodes = decodeNodes nodes'
-                              return ((nodeId, addr), nodes)
+                              return (Peer nodeId addr, nodes)
          case replyFields of
            Just (replyer, nodes) ->
-               do let isKnown st (Peer _ addr) = Map.member addr $ stSeen st
-                  atomically $ do
-                            st <- readTVar tDigState
-                            st <- foldM (\st (nodeId, addr) ->
-                                             let peer = Peer nodeId addr
-                                             in if isKnown st peer
-                                                then return st
-                                                else return $ st { stFind = stFind st |> peer,
-                                                                   stSeen = Map.insert addr () $ stSeen st,
-                                                                   stCache = if Seq.length (stCache st) < maxCacheSize
-                                                                             then stCache st |> peer
-                                                                             else stCache st
-                                                                 }
-                                        ) st nodes
-                            writeTVar tDigState st
+               atomically $
+               forM_ nodes $ \(nodeId, addr) ->
+                   do let peer = Peer nodeId addr
+                      known <- isPeerKnown tDigState peer
+                      unless known $
+                             do insertCache tDigState peer
+                                insertFindPeer tDigState peer
            Nothing -> return ()
+
+isPeerKnown :: TVar DigState -> Peer -> STM Bool
+isPeerKnown tDigState peer@(Peer _ addr)
+    = do st <- readTVar tDigState
+         return $ Map.member addr $ stSeen st
+
+insertFindPeer :: TVar DigState -> Peer -> STM ()
+insertFindPeer tDigState peer@(Peer nodeId addr)
+    = do st <- readTVar tDigState
+         let target = stFindTarget st
+             distance = target <-> nodeId
+             st' = st { stFind = Map.insert distance peer $ stFind st,
+                        stSeen = Map.insert addr () $ stSeen st
+                      }
+         writeTVar tDigState st'
+
+insertCache tDigState peer
+    = do st <- readTVar tDigState
+         when (Seq.length (stCache st) < maxCacheSize) $
+              writeTVar tDigState $ st { stCache = stCache st |> peer }
 
 queryHandler log tDigState addr query
     = do log query
-         atomically $ do
-           st <- readTVar tDigState
-           when (Seq.length (stCache st) < maxCacheSize) $
-                writeTVar tDigState $ st { stCache = stCache st |> peer }
+         atomically $
+                    do known <- isPeerKnown tDigState peer
+                       unless known $
+                              insertCache tDigState peer
          return $ handleQuery query
     where peer = Peer nodeId addr
           nodeId = case query of

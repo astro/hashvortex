@@ -34,6 +34,8 @@ distance :: NodeId -> NodeId -> Integer
 distance (NodeId a) (NodeId b)
     = bufToInteger $ W8.pack $ W8.zipWith xor a b
 
+(<->) = distance
+
 distanceOrder :: NodeId -> NodeId -> Int
 distanceOrder a b = let r 0 = 0
                         r n = 1 + r (n `shiftR` 1)
