@@ -91,14 +91,17 @@ dig tDigState = do resetter <- resetDig tDigState
                                 (_, False, _) | stFindCount st >= maxFindCount ->
                                       do resetter
                                          getNext
-                                (True, _, _) ->
-                                    return Nothing
+                                (True, False, _) ->
+                                      do resetter
+                                         getNext
                                 (False, _, (_distance, peer)) ->
                                     do writeTVar tDigState $
                                                  st { stFind = Map.deleteMin $ stFind st,
                                                       stFindCount = stFindCount st + 1
                                                     }
                                        return $ Just (stNode st, stFindTarget st, peer)
+                                _ ->
+                                    return Nothing
                    next <- atomically getNext
                    case next of
                      Just (node, target, Peer findNodeId findAddr) ->
