@@ -47,7 +47,7 @@ newLog logPath =
 writer :: FilePath -> Chan Event -> IO ()
 writer logPath chan
     = do start <- getPOSIXTime
-         withFile logPath WriteMode $ \f ->
+         withFile logPath AppendMode $ \f ->
              do hSetBuffering f LineBuffering
                 let loop = do event <- liftIO $ readChan chan
                               datas <- updateEvents event
