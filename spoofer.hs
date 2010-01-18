@@ -79,7 +79,7 @@ resetDig tDigState
                                   stSeen = Map.empty,
                                   stCache = Seq.empty
                                 }
-                   mapM_ (insertCache tDigState) $ toList (stCache st)
+                   mapM_ (insertFindPeer tDigState) $ toList (stCache st)
 
 dig :: TVar DigState -> IO ()
 dig tDigState = do resetter <- resetDig tDigState
