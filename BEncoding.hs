@@ -1,4 +1,4 @@
-module BEncoding (BValue(..), encode, decode, bdictLookup) where
+module BEncoding (BValue(..), encode, decode, bdict, bdictLookup) where
 
 import qualified Data.ByteString.Lazy.Char8 as B8
 import qualified Data.ByteString.Lazy as W8
@@ -32,6 +32,11 @@ encode (BDict xs) = B8.singleton 'd' `B8.append`
                                         encode k `B8.append` encode v
                                    ) xs) `B8.append`
                     B8.singleton 'e'
+
+bdict :: [(String, BValue)] -> BValue
+bdict = BDict . map (\(s, v) ->
+                         (BString $ B8.pack s, v)
+                    )
 
 instance Show BValue where
     show (BInteger i) = show i
