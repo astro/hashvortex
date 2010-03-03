@@ -3,7 +3,6 @@ module KRPC where
 import qualified Data.ByteString.Lazy.Char8 as B8
 import qualified Data.ByteString.Lazy as W8
 import qualified Data.ByteString as SW8
-import Data.LargeWord (Word160)
 import Data.Binary.Get
 import Data.Binary.Put
 import Network.Socket (SockAddr(SockAddrInet))

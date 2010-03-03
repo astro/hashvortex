@@ -6,7 +6,6 @@ import qualified Data.ByteString.Char8 as SB8
 import Data.Binary.Strict.Get
 import Data.Char (isDigit, chr)
 import Control.Monad
-import qualified Data.Digest.SHA1 as SHA1
 import Test.QuickCheck
 import Data.List (intercalate)
 
@@ -101,11 +100,6 @@ decoder = do c1 <- getChar
 parseFile :: FilePath -> IO (Either String BValue)
 parseFile f = decode `liftM` B8.readFile f
 -}
-
-infoHash :: BValue -> SHA1.Word160
-infoHash dict = let Just infoVal = dict `bdictLookup` "info"
-                in sha1 $ encode infoVal
-    where sha1 = SHA1.hash . W8.unpack
 
 bdictLookup :: BValue -> String -> Maybe BValue
 bdictLookup (BDict dict) key = lookup (BString $ B8.pack key) dict
