@@ -73,7 +73,9 @@ main = do log <- newLog "spoofer.data"
 
 resetDig :: IORef DigState -> IO ()
 resetDig rDigState
-    = do nodeId <- makeRandomNodeId
+    = do putStr $ "Before reset: "
+         printStats rDigState
+         nodeId <- makeRandomNodeId
          modifyIORef rDigState $ \st ->
              st { stFindTarget = nodeId,
                   stFind = Map.empty,
@@ -83,6 +85,8 @@ resetDig rDigState
                 }
          peers <- (toList . stCache) `liftM` readIORef rDigState
          mapM_ (insertFindPeer rDigState) peers
+         putStr $ "After reset: "
+         printStats rDigState
 
 dig :: IORef DigState -> IO Int
 dig rDigState = do let reset = resetDig rDigState
