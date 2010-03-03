@@ -1,5 +1,6 @@
 module EventLog (Logger, newLog) where
 
+import Data.IORef
 import Control.Concurrent (forkIO)
 import Control.Concurrent.Chan
 import System.IO
@@ -33,8 +34,7 @@ instance Show TimeData where
 
 newLog :: FilePath -> IO Logger
 newLog logPath =
-    do chan <- newChan
-       forkIO $ writer logPath chan
+    do w <- writer logPath
        return $ \query ->
            do now <- getPOSIXTime
               let q = case query of
@@ -42,20 +42,24 @@ newLog logPath =
                         FindNode _ _ -> "FindNode"
                         GetPeers _ _ -> "GetPeers"
                         AnnouncePeer _ _ _ _ -> "AnnouncePeer"
-              writeChan chan $ Event now q
 
-writer :: FilePath -> Chan Event -> IO ()
-writer logPath chan
-    = do start <- getPOSIXTime
-         withFile logPath AppendMode $ \f ->
-             do hSetBuffering f LineBuffering
-                let loop = do event <- liftIO $ readChan chan
-                              datas <- updateEvents event
-                              liftIO $
-                                     forM_ datas $
-                                     hPutStrLn f . show
-                              loop
-                evalStateT loop $ State (start - 1.0) Set.empty
+              w $ Event now q
+
+writer :: FilePath -> IO (Event -> IO ())
+writer logPath
+    = do f <- openFile logPath AppendMode
+         hSetBuffering f LineBuffering
+
+         start <- getPOSIXTime
+         stRef <- newIORef $ State (start - 1.0) Set.empty
+         return $ \event ->
+             do st <- readIORef stRef
+                st' <- execStateT (do datas <- updateEvents event
+                                      liftIO $
+                                             forM_ datas $
+                                             hPutStrLn f . show
+                                  ) st
+                writeIORef stRef st'
 
 interval = 0.1
 

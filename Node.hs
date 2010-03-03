@@ -2,7 +2,6 @@
 module Node where
 
 import Control.Concurrent
-import Control.Concurrent.MVar
 import qualified Data.ByteString.Lazy.Char8 as B8
 import qualified Data.ByteString.Char8 as SB8
 import Network.Socket hiding (send, sendTo, recv, recvFrom)
@@ -11,7 +10,10 @@ import Control.Concurrent.Chan
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Control.Monad
+import Data.IORef
+import qualified System.Event as Ev
 
+import InState
 import KRPC
 
 
@@ -21,33 +23,26 @@ data NodeState = State { stSock :: Socket,
                          stLastT :: T,
                          stQueries :: Map T (Packet -> IO ())
                        }
-type Node = MVar NodeState
+type Node = IORef NodeState
 type QueryHandler = SockAddr -> Query -> IO (Either Error Reply)
 type ReplyHandler = SockAddr -> Reply -> IO ()
 
-class InState a where
-    inState :: a -> Node -> IO ()
 
-instance InState (NodeState -> IO NodeState) where
-    inState f node = modifyMVar_ node f
-
-instance InState (NodeState -> IO ()) where
-    inState f node = withMVar node f
-
-instance InState (NodeState -> NodeState) where
-    inState f node = modifyMVar_ node $ return . f
-
-new :: Int -> IO Node
-new port = do sock <- socket AF_INET Datagram defaultProtocol
-              bindSocket sock (SockAddrInet (fromIntegral port) 0)
-              node <- newMVar State { stSock = sock,
-                                      stQueryHandler = nullQueryHandler,
-                                      stReplyHandler = nullReplyHandler,
-                                      stLastT = T B8.empty,
-                                      stQueries = Map.empty
-                                    }
-              me <- myThreadId
-              return node
+new :: Ev.EventManager -> Int -> IO Node
+new mgr port
+    = do sock <- socket AF_INET Datagram defaultProtocol
+         bindSocket sock (SockAddrInet (fromIntegral port) 0)
+         node <- newIORef State { stSock = sock,
+                                  stQueryHandler = nullQueryHandler,
+                                  stReplyHandler = nullReplyHandler,
+                                  stLastT = T B8.empty,
+                                  stQueries = Map.empty
+                                }
+         me <- myThreadId
+         let callback _key _ev = runOnce node
+             fd = fromIntegral $ fdSocket sock
+         Ev.registerFd mgr callback fd Ev.evtRead
+         return node
 
 nullQueryHandler _ _ = return $ Left $ Error 201 $ B8.pack "Not implemented"
 nullReplyHandler _ _ = return ()
@@ -62,7 +57,7 @@ run node = do runOnce node
               run node
 
 runOnce :: Node -> IO ()
-runOnce node = do sock <- withMVar node $ return . stSock
+runOnce node = do sock <- stSock `liftM` readIORef node
                   (buf, addr) <- recvFrom sock 65535
                   let handle st = catch (handlePacket st buf addr) $ \e ->
                                   do putStrLn $ "Error handling packet: " ++ show e
