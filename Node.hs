@@ -102,22 +102,6 @@ handlePacket st buf addr
            Left e -> do --putStrLn e
                         return st
 
-sendQuery :: SockAddr -> Query -> Node -> IO Packet
-sendQuery addr qry node
-    = do chan <- newChan
-         let recvReply = writeChan chan
-             send st = do let t = tSucc $ stLastT st
-                              pkt = QPacket t qry
-                              buf = SB8.concat $ B8.toChunks $ encodePacket pkt
-                          catch (sendTo (stSock st) buf addr >>
-			         return ()
-				) $ \a -> return ()
-                          return st { stLastT = t,
-                                      stQueries = Map.insert t recvReply $ stQueries st
-                                    }
-         inState send node
-         readChan chan
-
 sendQueryNoWait :: SockAddr -> Query -> Node -> IO ()
 sendQueryNoWait addr qry
     = inState $ \st ->
