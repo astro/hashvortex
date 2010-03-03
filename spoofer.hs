@@ -76,6 +76,7 @@ resetDig rDigState
     = do putStr $ "Before reset: "
          printStats rDigState
          nodeId <- makeRandomNodeId
+         cachedPeers <- (toList . stCache) `liftM` readIORef rDigState
          modifyIORef rDigState $ \st ->
              st { stFindTarget = nodeId,
                   stFind = Map.empty,
@@ -83,8 +84,7 @@ resetDig rDigState
                   stSeen = Map.empty,
                   stCache = Seq.empty
                 }
-         peers <- (toList . stCache) `liftM` readIORef rDigState
-         mapM_ (insertFindPeer rDigState) peers
+         mapM_ (insertFindPeer rDigState) cachedPeers
          putStr $ "After reset: "
          printStats rDigState
 
