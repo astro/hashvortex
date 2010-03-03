@@ -44,7 +44,7 @@ idleSleep = 0.1
 
 main = do log <- newLog "spoofer.data"
           mgr <- Ev.new
-          node <- Node.new mgr 9999
+          node <- Node.new mgr 10000
           nodeId <- makeRandomNodeId
           now <- getPOSIXTime
           entryAddrs <- Node.getAddrs "router.bittorrent.com" "6881"
