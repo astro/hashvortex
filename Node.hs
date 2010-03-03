@@ -71,7 +71,7 @@ handlePacket st buf addr
          case errorOrPkt of
            Right pkt ->
                do let queries = stQueries st
-                  putStrLn $ "Received " ++ show pkt ++ " from " ++ show addr
+                  --putStrLn $ "Received " ++ show pkt ++ " from " ++ show addr
                   let (isReply, isQuery, t) = case pkt of
                                                 RPacket t _ -> (True, False, t)
                                                 EPacket t _ -> (True, False, t)
@@ -94,7 +94,7 @@ handlePacket st buf addr
                                        Left e -> EPacket t e
                                        Right r -> RPacket t r
                                buf = SB8.concat $ B8.toChunks $ encodePacket pkt
-                           putStrLn $ "Replying " ++ show pkt ++ " to " ++ show addr
+                           --putStrLn $ "Replying " ++ show pkt ++ " to " ++ show addr
                            catch (sendTo (stSock st) buf addr >>
                                   return ()
                                  ) $ \_ -> return ()
@@ -108,7 +108,7 @@ sendQueryNoWait addr qry
       do let t = tSucc $ stLastT st
              pkt = QPacket t qry
              buf = SB8.concat $ B8.toChunks $ encodePacket pkt
-         putStrLn $ "Sending to " ++ show addr ++ ": " ++ show pkt
+         --putStrLn $ "Sending to " ++ show addr ++ ": " ++ show pkt
          catch (sendTo (stSock st) buf addr >>
 	 	return ()
 	       ) $ \a -> return ()
