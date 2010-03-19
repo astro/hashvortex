@@ -8,6 +8,7 @@ import Data.Binary.Put
 import Network.Socket (SockAddr(SockAddrInet))
 import Data.Maybe (fromMaybe)
 import Control.Monad
+import Control.DeepSeq
 
 import BEncoding
 import NodeId
@@ -16,6 +17,8 @@ import IntBuf
 
 newtype T = T B8.ByteString
     deriving (Eq, Show, Ord)
+instance NFData T where
+    rnf (T bs) = rnf $ B8.unpack bs
 
 tSucc :: T -> T
 tSucc = mapT $ integerToBuf . (+ 1) . bufToInteger
@@ -26,18 +29,38 @@ data Packet = QPacket T Query
             | RPacket T Reply
             | EPacket T Error
            deriving (Show, Eq)
+instance NFData Packet where
+    rnf (QPacket t query) = rnf t `seq`
+                            rnf query
+    rnf (RPacket t reply) = rnf t `seq`
+                            rnf reply
+    rnf (EPacket t error) = rnf t `seq`
+                            rnf error
 data Query = Ping NodeId
            | FindNode NodeId NodeId
            | GetPeers NodeId NodeId
            | AnnouncePeer NodeId NodeId Integer B8.ByteString
            | OtherQuery String BValue
            deriving (Show, Eq)
+instance NFData Query where
+    rnf (Ping nodeId) = rnf nodeId
+    rnf (FindNode nodeId nodeId') = rnf nodeId `seq`
+                                    rnf nodeId'
+    rnf (GetPeers nodeId nodeId') = rnf nodeId `seq`
+                                    rnf nodeId'
+    rnf (AnnouncePeer nodeId nodeId' i bs) = rnf nodeId `seq`
+                                             rnf nodeId' `seq`
+                                             rnf i `seq`
+                                             rnf (B8.unpack bs)
 type Reply = BValue
 {-data Reply = PingReply NodeId
            | FindNodeReply NodeId [(NodeId, SockAddr)]
            deriving (Show, Eq)-}
 data Error = Error Integer B8.ByteString
            deriving (Show, Eq)
+instance NFData Error where
+    rnf (Error i bs) = rnf i `seq`
+                       rnf (B8.unpack bs)
 
 decodePacket :: SW8.ByteString -> Either String Packet
 decodePacket buf

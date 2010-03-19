@@ -6,6 +6,7 @@ import qualified Data.ByteString.Lazy as LW8
 import Numeric (showHex)
 import Data.Bits
 import System.Random
+import Control.DeepSeq
 
 import IntBuf
 
@@ -17,6 +18,9 @@ instance Show NodeId where
     show (NodeId b) = pad 40 $ showHex (bufToInteger b) ""
         where pad len s | length s < len = pad len $ '0':s
                         | otherwise = s
+
+instance NFData NodeId where
+    rnf (NodeId bs) = bs `seq` ()
 
 makeNodeId = NodeId . W8.concat . LW8.toChunks
 

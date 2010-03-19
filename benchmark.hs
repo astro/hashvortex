@@ -1,5 +1,6 @@
 module Main where
 
+import Criterion.Main
 import Control.Monad.State
 import System.Random
 import Data.Char (chr)
@@ -38,8 +39,8 @@ mkRequest = do t <- randomBytes 4
 runRandomT :: Randomized a -> IO a
 runRandomT f = getStdGen >>= return . evalState f . randomRs ('\0', '\xFF')
 
-
-main = do t1 <- getCPUTime
+{-
+main' = do t1 <- getCPUTime
           let n = 100000
           pkts <- runRandomT (mapM (const mkRequest) [1..n])
           t2 <- {-# SCC "pkts" #-} pkts `deepseq` getCPUTime
@@ -57,3 +58,12 @@ main = do t1 <- getCPUTime
           t4 <- {-# SCC "allOk" #-} allOk `seq` getCPUTime
           putStrLn $ "allOk=" ++ show allOk ++ ", rate: " ++
                        (show $ fromInteger n * 1000000000000 / fromInteger (t4 - t3)) ++ " Hz"
+-}
+
+main = defaultMain [
+        bgroup "benc" [bench "encoding" $ nfIO encode,
+                       bench "decoding" $ nfIO decode]
+       ]
+    where encode = runRandomT mkRequest
+          -- FIXME: decode should use previous encode result
+          decode = encode >>= return . decodePacket

@@ -8,6 +8,7 @@ import Data.Char (isDigit, chr)
 import Control.Monad
 import Test.QuickCheck
 import Data.List (intercalate)
+import Control.DeepSeq
 
 
 data BValue = BInteger Integer
@@ -15,6 +16,16 @@ data BValue = BInteger Integer
             | BList [BValue]
             | BDict [(BValue, BValue)]
             deriving (Eq, Ord)
+instance NFData BValue where
+    rnf (BInteger i) = rnf i
+    rnf (BString bs) = rnf $ B8.unpack bs
+    rnf (BList []) = ()
+    rnf (BList (x:xs)) = rnf x `seq`
+                       rnf (BList xs)
+    rnf (BDict []) = ()
+    rnf (BDict ((x, x'):xs)) = rnf x `seq`
+                             rnf x' `seq`
+                             rnf (BDict xs)
 
 encode :: BValue -> B8.ByteString
 encode (BInteger i) = B8.singleton 'i' `B8.append`
