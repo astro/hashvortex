@@ -1,105 +1,74 @@
 module EventLog (Logger, newLog) where
 
 import Data.IORef
-import Control.Concurrent (forkIO)
-import Control.Concurrent.Chan
 import System.IO
 import Data.Time.Clock.POSIX (getPOSIXTime, POSIXTime)
-import Control.Monad (when)
-import Data.Set (Set)
-import qualified Data.Set as Set
 import Control.Monad.State hiding (State)
-import Text.Printf (printf)
 import Data.List (intercalate)
+import Data.Array.Unboxed
 
 import KRPC
 
 
 type Logger = Query -> IO ()
-data Event = Event { evTime :: POSIXTime,
-                     evQuery :: String
-                   }
-             deriving (Eq, Ord)
-data LoggerState = State { stNow :: POSIXTime,
-                           stEvents :: Set Event
+type Events = UArray Int Int
+type Time = POSIXTime
+data LoggerState = State { stInterval :: Time,
+                           stNow :: Time,
+                           stEvents :: Events
                          }
-
-type Data = [Int]
-data TimeData = TimeData POSIXTime Data
-instance Show TimeData where
-    show (TimeData time datas)
-        = intercalate " " $
-          printf "%.2f " (realToFrac time :: Double):map show datas
+type LoggerAction a = StateT LoggerState IO a
 
 
-newLog :: FilePath -> IO Logger
-newLog logPath =
-    do w <- writer logPath
-       return $ \query ->
-           do now <- getPOSIXTime
-              let q = case query of
-                        Ping _ -> "Ping"
-                        FindNode _ _ -> "FindNode"
-                        GetPeers _ _ -> "GetPeers"
-                        AnnouncePeer _ _ _ _ -> "AnnouncePeer"
 
-              w $ Event now q
-
-writer :: FilePath -> IO (Event -> IO ())
-writer logPath
+newLog :: Double -> FilePath -> IO Logger
+newLog interval logPath
     = do f <- openFile logPath AppendMode
          hSetBuffering f LineBuffering
 
          start <- getPOSIXTime
-         stRef <- newIORef $ State (start - 1.0) Set.empty
-         return $ \event ->
-             do st <- readIORef stRef
-                st' <- execStateT (do datas <- updateEvents event
-                                      liftIO $
-                                             forM_ datas $
-                                             hPutStrLn f . show
-                                  ) st
-                writeIORef stRef st'
+         stRef <- newIORef $ State (realToFrac interval) start newEvents
+         return $ writer f stRef
 
-interval = 0.1
+writer :: Handle -> IORef LoggerState -> Logger
+writer f stRef query
+    =  getPOSIXTime >>= \now ->
 
-updateEvents :: Event -> StateT LoggerState IO [TimeData]
-updateEvents event@(Event now _)
+       readIORef stRef >>=
+       execStateT (writeUntilNow f now
+                   >>
+                   incEvent query) >>=
+       writeIORef stRef
+
+writeUntilNow :: Handle -> Time -> LoggerAction ()
+writeUntilNow f now
+    = get >>= \st ->
+      let nextInterval = stNow st + stInterval st
+      in if nextInterval <= now
+         then -- One interval step
+              writeEvents f >>
+              put (st { stNow = nextInterval }) >>
+              -- Loop
+              writeUntilNow f now
+      else return ()
+
+writeEvents :: Handle -> LoggerAction ()
+writeEvents f
     = do st <- get
-         put $ st { stEvents = event `Set.insert` stEvents st }
+         liftIO $ hPutStrLn f $ intercalate " " $ show (stNow st) : map show (elems $ stEvents st)
+         put $ st { stEvents = newEvents }
 
-         let datas = get >>= \st ->
-                     if stNow st + interval < now - 0.5
-                     then do dropUntilNow
-                             data' <- TimeData now `liftM` countEvents
-                                    
-                             st <- get
-                             put $ st { stNow = stNow st + interval }
-                                  
-                             liftM (data':) datas
-                     else return []
-         datas
+newEvents :: Events
+newEvents = array (1, 4) [(n, 0) | n <- [1..4]]
 
-dropUntilNow :: StateT LoggerState IO ()
-dropUntilNow = do st <- get
-                  let now = stNow st
-                      events = snd $
-                               Set.split (Event (now - 0.5) "") $
-                               stEvents st
-                  put $ st { stEvents = events }
-
-countEvents :: StateT LoggerState IO Data
-countEvents = do st <- get
-                 let now = stNow st
-                     events = fst $
-                              Set.split (Event (now + 0.5) "") $
-                              stEvents st
-                     count s = Set.size $
-                               Set.filter (\event ->
-                                               evQuery event == s
-                                          ) events
-                     data' = [count "Ping",
-                              count "FindNode",
-                              count "GetPeers",
-                              count "AnnouncePeer"]
-                 return data'
+incEvent :: Query -> LoggerAction ()
+incEvent query
+    = do st <- get
+         let events = stEvents st
+             events' = events // [(i, (events ! i) + 1)]
+         put $ st { stEvents = events' }
+    where i = case query of
+                Ping _ -> 1
+                FindNode _ _ -> 2
+                GetPeers _ _ -> 3
+                AnnouncePeer _ _ _ _ -> 4
