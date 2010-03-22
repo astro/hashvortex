@@ -1,14 +1,17 @@
-module BEncoding (BValue(..), encode, decode, bdict, bdictLookup) where
+module BEncoding (BValue(..), encode, decode, parseFile, bdict, bdictLookup, infoHash) where
 
 import qualified Data.ByteString.Lazy.Char8 as B8
 import qualified Data.ByteString.Lazy as W8
 import qualified Data.ByteString.Char8 as SB8
+import qualified Data.ByteString as SW8
 import Data.Binary.Strict.Get
 import Data.Char (isDigit, chr)
 import Control.Monad
 import Test.QuickCheck
 import Data.List (intercalate)
 import Control.DeepSeq
+import OpenSSL.Digest (MessageDigest(SHA1))
+import OpenSSL.Digest.ByteString.Lazy (digest)
 
 
 data BValue = BInteger Integer
@@ -107,13 +110,21 @@ decoder = do c1 <- getChar
                          else do el <- e
                                  (el:) `liftM` manyTill e c
 
-{-
-parseFile :: FilePath -> IO (Either String BValue)
-parseFile f = decode `liftM` B8.readFile f
--}
+parseFile :: FilePath -> IO (Maybe BValue)
+parseFile = return . result . decode <=< SB8.readFile
+    where result (Left _) = Nothing
+          result (Right a) = Just a
 
 bdictLookup :: BValue -> String -> Maybe BValue
 bdictLookup (BDict dict) key = lookup (BString $ B8.pack key) dict
+bdictLookup _ _ = Nothing
+
+infoHash :: BValue -> IO (Maybe SW8.ByteString)
+infoHash metaInfo
+    = maybe (return Nothing) (return . Just <=< sha1) $
+      encode `liftM` (metaInfo `bdictLookup` "info")
+    where sha1 :: B8.ByteString -> IO SW8.ByteString
+          sha1 bs = SW8.pack `liftM` digest SHA1 bs
 
 {-
 instance Arbitrary Char where
