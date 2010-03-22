@@ -12,7 +12,7 @@ import IntBuf
 
 
 newtype NodeId = NodeId W8.ByteString
-    deriving (Eq)
+    deriving (Eq, Ord)
 
 instance Show NodeId where
     show (NodeId b) = pad 40 $ showHex (bufToInteger b) ""

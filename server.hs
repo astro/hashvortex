@@ -21,10 +21,11 @@ import qualified BEncoding as B
 data Buckets = Buckets NodeId (Array Int Bucket)
 type Bucket = Map NodeId Peer
 data PeerState = Good | Questionable | Bad
+               deriving (Eq, Show)
 data Peer = Peer { peerState :: PeerState,
                    peerAddress :: SockAddr
                  }
-type ServerAction a = State Buckets a
+type ServerAction a = StateT Buckets IO a
 
 param_n = 160
 
@@ -57,8 +58,17 @@ run port logPath nodeId
                        array (0, param_n) $
                        zip [0..param_n]  $ repeat Map.empty
          let inContext = withBuckets refBuckets
-         Node.setQueryHandler (withBuckets refBuckets $ handleQuery log) node
-         Node.setReplyHandler (withBuckets refBuckets handleReply) node
+         Node.setQueryHandler (\addr query ->
+                                   withBuckets refBuckets $
+                                   handleQuery log addr query
+                              ) node
+         Node.setReplyHandler (\addr reply ->
+                                   withBuckets refBuckets $
+                                   handleReply addr reply
+                              ) node
+         withBuckets refBuckets $
+                     bootstrap "router.bittorrent.com" 6881
+
          Ev.loop mgr
 
 withBuckets :: IORef Buckets -> ServerAction a -> IO a
@@ -69,9 +79,9 @@ withBuckets refBuckets f
          return a
 
 bootstrap :: String -> Int -> ServerAction ()
-bootstrap addr port
+bootstrap host port
     = do entryAddrs <- liftIO $ 
-                       Node.getAddrs "router.bittorrent.com" (show port)
+                       Node.getAddrs host (show port)
          forM_ entryAddrs $
                   \addr ->
                       -- TODO: just query
@@ -109,14 +119,14 @@ handleQuery logger addr query
 handleReply :: SockAddr -> Reply -> ServerAction ()
 handleReply addr reply
     = do case reply ?< "id" of
-           Just nodeId' ->
+           Just (B.BString nodeId') ->
                let nodeId = makeNodeId nodeId'
                in receivedReply nodeId addr
            Nothing ->
                return ()
 
          case reply ?< "nodes" of
-           Just nodes' ->
+           Just (B.BString nodes') ->
                let nodes = decodeNodes nodes'
                in forM_ nodes $
                       \(nodeId, addr) ->
@@ -128,7 +138,7 @@ class BucketIndex a where
 instance BucketIndex Int where
     getBucket n
         = do Buckets _ buckets <- get
-             return $ buckets !! n
+             return $ buckets ! n
     putBucket n bucket
         = do Buckets nodeId buckets <- get
              put $ Buckets nodeId $
@@ -179,7 +189,8 @@ receivedReply nodeId addr
          case Map.lookup nodeId bucket of
            -- Reply from a known peer
            Just peer ->
-               putBucket nodeId $ peer { peerState = Good }
+               putBucket nodeId $
+                         Map.insert nodeId (peer { peerState = Good }) bucket
            Nothing ->
                -- Who is this? Do we need this one?
                seen nodeId addr
