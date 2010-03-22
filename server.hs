@@ -1,15 +1,32 @@
 module Main where
-
-import System.Environment
-import Control.Monad.Maybe
-import Data.Maybe
-import Control.Applicative
-import Data.Array.IArray
-
-import qualified Node as Node
-import qualified BEncoding as B
+ 
+import qualified Data.ByteString.Lazy.Char8 as C
 import qualified System.Event as Ev
+import Network.Socket (SockAddr)
+import Data.Map (Map)
+import qualified Data.Map as Map
+import Data.Array.IArray
+import Data.IORef
+import Control.Monad.State.Lazy
+import System.Environment
+import Data.Maybe (fromMaybe)
+import Control.Monad.Maybe
+
+import EventLog
+import KRPC
+import qualified Node as Node
 import NodeId
+import qualified BEncoding as B
+
+data Buckets = Buckets NodeId (Array Int Bucket)
+type Bucket = Map NodeId Peer
+data PeerState = Good | Questionable | Bad
+data Peer = Peer { peerState :: PeerState,
+                   peerAddress :: SockAddr
+                 }
+type ServerAction a = State Buckets a
+
+param_n = 160
 
 -- Startup
 
@@ -20,7 +37,7 @@ main = do args <- getArgs
                    putStrLn $ "Random nodeId: " ++ show nodeId
                    run (read portS) logPath nodeId
             [portS, logPath, torrentFile] ->
-                do infoHash <- (fromMaybe $ error "No infohash") <$>
+                do infoHash <- (fromMaybe $ error "No infohash") `liftM`
                                runMaybeT (MaybeT (B.parseFile torrentFile) >>=
                                           MaybeT . B.infoHash)
                    let nodeId = makeNodeId infoHash
@@ -30,61 +47,141 @@ main = do args <- getArgs
                 do progName <- getProgName
                    putStrLn $ "Usage: " ++ progName ++ " <port> <log-path> [node-id-source.torrent]"
 
-run :: Int -> FilePath -> NodeId -> IO ()
 run port logPath nodeId
-    = do mgr <- Ev.new
+    = do log <- newLog 1.0 "spoofer.data"
+         mgr <- Ev.new
          node <- Node.new mgr port
+
+         refBuckets <- newIORef $
+                       Buckets nodeId $
+                       array (0, param_n) $
+                       zip [0..param_n]  $ repeat Map.empty
+         let inContext = withBuckets refBuckets
+         Node.setQueryHandler (withBuckets refBuckets $ handleQuery log) node
+         Node.setReplyHandler (withBuckets refBuckets handleReply) node
          Ev.loop mgr
 
--- Protocol parameters
+withBuckets :: IORef Buckets -> ServerAction a -> IO a
+withBuckets refBuckets f
+    = do buckets <- readIORef refBuckets
+         (a, buckets') <- runStateT f buckets
+         writeIORef refBuckets buckets'
+         return a
 
-param_n = 160
-param_k = 8
-param_alpha = 3
+bootstrap :: String -> Int -> ServerAction ()
+bootstrap addr port
+    = do entryAddrs <- liftIO $ 
+                       Node.getAddrs "router.bittorrent.com" (show port)
+         forM_ entryAddrs $
+                  \addr ->
+                      -- TODO: just query
+                      return ()
 
--- Routing data structures
+handleQuery :: Logger -> SockAddr -> Query
+            -> ServerAction (Either Error Reply)
+handleQuery logger addr query
+    = do let nodeId = case query of
+                        Ping nodeId -> nodeId
+                        FindNode nodeId _ -> nodeId
+                        GetPeers nodeId _ -> nodeId
+                        AnnouncePeer nodeId _ _ _ -> nodeId
+         seen nodeId addr
 
-data Buckets = Buckets NodeId (Array Int Bucket)
-type Bucket = Map NodeId Peer
+         Buckets myNodeId _ <- get
+         let myNodeId' = nodeIdToBuf myNodeId
 
-newBuckets nodeId
-    = Buckets nodeId $
-      array (0, param_n) $
-      zip [0..param_n] $ repeat []
+         case query of
+           Ping nodeId ->
+               return $
+                      Right $
+                      B.bdict [("id", B.BString myNodeId')]
+           FindNode nodeId target ->
+               return $
+                      Right $
+                      B.bdict [("id", B.BString myNodeId'),
+                               ("nodes", B.BString C.empty)  -- TODO
+                              ]
+           _ ->
+               return $
+                      Left $
+                      Error 201 $ C.pack "Not implemented"
 
-data Peer = Peer { peerId :: NodeId,
-                   peerAddress :: SockAddr,
-                   peerState :: PeerState,
-                   peerLastRequest :: Time,
-                   peerLastResponse :: Time
-                 }
-data PeerState = Good
-               | Questionable
-               | Bad
-                 deriving (Show, Eq, Ord)
+handleReply :: SockAddr -> Reply -> ServerAction ()
+handleReply addr reply
+    = do case reply ?< "id" of
+           Just nodeId' ->
+               let nodeId = makeNodeId nodeId'
+               in receivedReply nodeId addr
+           Nothing ->
+               return ()
 
--- |Modify a bucket
-mapBucket :: Buckets -> Int -> (Bucket -> (a, Bucket)) -> (a, Buckets)
-mapBucket (Buckets nodeId buckets) order f
-    = let bucket = buckets ! order
-          (a, bucket') = f bucket
-          bucket'' = Map.filter ((/= Bad) . peerState) bucket'
-          buckets' = buckets // [(order, bucket'')]
-      in (a, Buckets nodeId buckets')
+         case reply ?< "nodes" of
+           Just nodes' ->
+               let nodes = decodeNodes nodes'
+               in forM_ nodes $
+                      \(nodeId, addr) ->
+                          seen nodeId addr
 
-isBucketFull :: Buckets -> Int -> Bool
-isBucketFull buckets order
-    = fst $ mapBucket buckets order $
-      (>= 8) .
-      Map.length .
+class BucketIndex a where
+    getBucket :: a -> ServerAction Bucket
+    putBucket :: a -> Bucket -> ServerAction ()
+instance BucketIndex Int where
+    getBucket n
+        = do Buckets _ buckets <- get
+             return $ buckets !! n
+    putBucket n bucket
+        = do Buckets nodeId buckets <- get
+             put $ Buckets nodeId $
+                 buckets // [(n, bucket)]
+instance BucketIndex NodeId where
+    getBucket nodeId
+        = do Buckets myNodeId _ <- get
+             getBucket $ nodeId `distanceOrder` myNodeId
+    putBucket nodeId bucket
+        = do Buckets myNodeId _ <- get
+             putBucket (nodeId `distanceOrder` myNodeId) bucket
+
+isFull :: Bucket -> Bool
+isFull
+    = (>= 8) .
+      Map.size .
       Map.filter ((== Good) . peerState)
 
+seen :: NodeId -> SockAddr -> ServerAction ()
+seen nodeId addr
+    = do bucket <- getBucket nodeId
+         when (not $ isFull bucket) $
+              putBucket nodeId $
+              Map.alter update nodeId bucket
+    where update Nothing
+              = Just $ Peer { peerState = Questionable,
+                              peerAddress = addr
+                            }
+          update (Just peer)
+              = Just $ case (peerState peer,
+                             addr == peerAddress peer) of
+                         -- Never allow address update of good peer
+                         (Good, _) -> peer
+                         -- Clear Bad ones with updated address
+                         (Bad, False) -> Peer { peerAddress = addr,
+                                                peerState = Questionable
+                                              }
+                         -- But others will be updated
+                         (_, False) -> peer { peerAddress = addr,
+                                              peerState = Questionable
+                                            }
+                         -- No change
+                         (_, True) -> peer
 
-{-
--- |Modify a peer
-withPeer :: Buckets -> NodeId -> (Peer -> Peer) -> Buckets
-withPeer (Buckets nodeId buckets) peerNodeId f
-    = let order = nodeId `distanceOrder` peerNodeId
-          bucket = buckets !! order
-          peer = 
--}
+receivedReply :: NodeId -> SockAddr -> ServerAction ()
+receivedReply nodeId addr
+    = do bucket <- getBucket nodeId
+         case Map.lookup nodeId bucket of
+           -- Reply from a known peer
+           Just peer ->
+               putBucket nodeId $ peer { peerState = Good }
+           Nothing ->
+               -- Who is this? Do we need this one?
+               seen nodeId addr
+
+(?<) = B.bdictLookup
