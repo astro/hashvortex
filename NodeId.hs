@@ -22,7 +22,12 @@ instance Show NodeId where
 instance NFData NodeId where
     rnf (NodeId bs) = bs `seq` ()
 
-makeNodeId = NodeId . W8.concat . LW8.toChunks
+class NodeIdSource a where
+    makeNodeId :: a -> NodeId
+instance NodeIdSource W8.ByteString where
+    makeNodeId = NodeId
+instance NodeIdSource LW8.ByteString where
+    makeNodeId = NodeId . W8.concat . LW8.toChunks
 
 makeRandomNodeId :: IO NodeId
 makeRandomNodeId = (NodeId .
