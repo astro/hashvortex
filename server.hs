@@ -14,6 +14,8 @@ import Control.Monad.Maybe
 import Data.Time.Clock.POSIX
 import Data.List (intercalate, sortBy)
 import Data.Ix (inRange)
+import Text.Tabular
+import qualified Text.Tabular.AsciiArt as AA
 
 import qualified ControlSocket
 import EventLog
@@ -88,7 +90,20 @@ run port logPath nodeId
                                 ["buckets"] ->
                                     listBuckets
                                 ["nodeId"] ->
-                                    show `liftM` getNodeId
+                                    (++ "\n") `liftM` show `liftM` getNodeId
+                                ["peers"] ->
+                                    do myNodeId <- getNodeId
+                                       Buckets _ buckets <- get
+                                       let peers = concatMap Map.toList $ elems buckets
+                                       return $ AA.render id id id $
+                                              Table (Group SingleLine $ map (Header . show . peerAddress . snd) peers)
+                                                        (Group SingleLine [Header "State",
+                                                                           Header "Dist",
+                                                                           Header "NodeId"])
+                                                        [[show $ peerState peer,
+                                                          show $ myNodeId `distanceOrder` nodeId,
+                                                          show $ nodeId]
+                                                         | (nodeId, peer) <- peers]
                                 [] -> return ""
                                 cmd:_ -> return $ "Unknown command " ++ show cmd
 
