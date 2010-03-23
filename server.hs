@@ -12,7 +12,7 @@ import System.Environment
 import Data.Maybe (fromMaybe)
 import Control.Monad.Maybe
 import Data.Time.Clock.POSIX
-import Data.List (intercalate, sortBy, groupBy)
+import Data.List (intercalate, sortBy, groupBy, nub)
 import Data.Ix (inRange)
 import Text.Tabular
 import qualified Text.Tabular.AsciiArt as AA
@@ -25,7 +25,7 @@ import NodeId
 import qualified BEncoding as B
 import InState
 
-data ServerState = Server NodeId (Array Int Bucket)
+data ServerState = Server NodeId (Array Int Bucket) TrackerAddrs TrackerStats
              deriving (Show)
 type Bucket = Map NodeId Peer
 data PeerState = Good | Questionable | Bad
@@ -36,6 +36,8 @@ data Peer = Peer { peerState :: PeerState,
                    peerLastSend :: Time
                  }
             deriving (Show, Eq)
+type TrackerStats = Map NodeId (Integer, Integer)
+type TrackerAddrs = [SockAddr]
 type Time = POSIXTime
 type ServerAction a = StateT ServerState IO a
 
@@ -69,7 +71,7 @@ run port logPath nodeId
 
          refServer <- newIORef $
                        Server nodeId (array (0, param_n) $
-                                      zip [0..param_n]  $ repeat Map.empty)
+                                      zip [0..param_n]  $ repeat Map.empty) [] Map.empty
          let inContext = withServer refServer
          Node.setQueryHandler (\addr query ->
                                    withServer refServer $
@@ -94,7 +96,7 @@ run port logPath nodeId
                                 ["peers"] ->
                                     do now <- liftIO $ getPOSIXTime
                                        myNodeId <- getNodeId
-                                       Server _ buckets <- get
+                                       Server _ buckets _ _ <- get
                                        let peers = concatMap Map.toList $ elems buckets
                                        return $ AA.render id id id $
                                               Table (Group SingleLine $
@@ -117,6 +119,33 @@ run port logPath nodeId
                                                           showTimeDiff now (peerLastSend peer),
                                                           showTimeDiff now (peerLastReply peer)]
                                                          | (nodeId, peer) <- peers]
+                                ["tracker"] ->
+                                    do Server _ _ _ stats <- get
+                                       let stats' = Map.toList stats
+                                       return $ AA.render id id id $
+                                              Table (Group NoLine $
+                                                           map (Header . show . fst) stats')
+                                                        (Group SingleLine [Header "Reads",
+                                                                           Header "Writes"])
+                                                        [[show r, show w]
+                                                         | (_, (r, w)) <- stats']
+                                ["pclear"] ->
+                                    do Server myNodeId buckets _ stats <- get
+                                       put $ Server myNodeId buckets [] stats
+                                       return "Cleared\n"
+                                ["plist"] ->
+                                    do Server _ _ addrs _ <- get
+                                       return $ (intercalate " " $ map show addrs) ++ "\n"
+                                "padd" : addrS ->
+                                    do Server myNodeId buckets addrs stats <- get
+                                       addrs' <- liftIO $
+                                                 forM addrS $ \s ->
+                                                 let (host, ':' : port) = break (== ':') s
+                                                 in nub `liftM`
+                                                    Node.getAddrs host port
+                                       let addrs'' = addrs ++ concat addrs'
+                                       put $ Server myNodeId buckets addrs'' stats
+                                       return "Added\n"
                                 [] -> return ""
                                 cmd:_ -> return $ "Unknown command " ++ show cmd ++ "\n"
 
@@ -132,7 +161,7 @@ withServer :: IORef ServerState -> ServerAction a -> IO a
 withServer = refInStateT
 
 getNodeId :: ServerAction NodeId
-getNodeId = get >>= \(Server nodeId _) -> return nodeId
+getNodeId = get >>= \(Server nodeId _ _ _) -> return nodeId
 
 bootstrap :: Node.Node -> String -> Int -> ServerAction ()
 bootstrap node host port
@@ -172,6 +201,44 @@ handleQuery log addr query
                          B.bdict [("id", B.BString myNodeId'),
                                   ("nodes", B.BString $ encodeNodes nodes)
                                  ]
+           GetPeers nodeId infoHash ->
+               do let token = C.pack "foo"
+
+                  nodes <- take 8 `liftM`
+                           filter (\(nodeId, addr) ->
+                                       (nodeId <-> infoHash) < (myNodeId <-> infoHash)
+                                  ) `liftM` selectNodesFor infoHash
+                  case nodes of
+                    -- No nearer nodes to infoHash, we are responsible
+                    [] ->
+                        do addrs <- trackGet infoHash
+                           return $
+                                  Right $
+                                  B.bdict [("id", B.BString myNodeId'),
+                                           ("token", B.BString token),
+                                           ("values", B.BList $ map (B.BString . encodeAddr) addrs)]
+                    -- Nearer nodes available, act like FindNode with
+                    -- token. No idea why token would be needed in this
+                    -- case?
+                    _ ->
+                        do liftIO $ putStrLn $ "Redirecting GetPeers for " ++ show infoHash
+                           return $
+                                  Right $
+                                  B.bdict [("id", B.BString myNodeId'),
+                                           ("token", B.BString token),
+                                           ("nodes", B.BString $ encodeNodes nodes)]
+           AnnouncePeer nodeId infoHash port token ->
+               do let valid = True
+                  case valid of
+                    True ->
+                        do trackPeer infoHash addr port
+                           return $
+                                  Right $
+                                  B.bdict [("id", B.BString myNodeId')]
+                    False ->
+                        return $
+                               Left $
+                               Error 203 $ C.pack "Bad token"
            _ ->
                return $
                       Left $
@@ -198,11 +265,11 @@ class BucketIndex a where
     putBucket :: a -> Bucket -> ServerAction ()
 instance BucketIndex Int where
     getBucket n
-        = do Server _ buckets <- get
+        = do Server _ buckets _ _ <- get
              return $ buckets ! n
     putBucket n bucket
-        = do Server nodeId buckets <- get
-             put $ Server nodeId (buckets // [(n, bucket)])
+        = do Server nodeId buckets addrs stats <- get
+             put $ Server nodeId (buckets // [(n, bucket)]) addrs stats
 instance BucketIndex NodeId where
     getBucket nodeId
         = do myNodeId <- getNodeId
@@ -361,5 +428,30 @@ listBuckets
               = showAddress (peerAddress peer) ++
                 "[" ++ take 1 (show $ peerState peer) ++ "]"
           showAddress = fst . break (== ':') . show
+
+trackPeer :: NodeId -> SockAddr -> Integer -> ServerAction ()
+trackPeer infoHash _addr _port
+    = do Server myNodeId buckets addrs stats <- get
+         let stats' = Map.alter (\old -> Just $
+                                         case old of
+                                           Nothing -> (0, 1)
+                                           Just (r, w) -> (r, w + 1)
+                                 ) infoHash stats
+         stats' `seq`
+                put $ Server myNodeId buckets addrs stats'
+
+trackGet :: NodeId -> ServerAction TrackerAddrs
+trackGet infoHash
+    = do Server myNodeId buckets addrs stats <- get
+         let stats' = Map.alter (\old -> Just $
+                                         case old of
+                                           Nothing -> (1, 0)
+                                           Just (r, w) -> (r + 1, w)
+                                 ) infoHash stats
+         stats' `seq`
+                put $ Server myNodeId buckets addrs stats'
+         return addrs
+
+
 
 (?<) = B.bdictLookup
