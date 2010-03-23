@@ -114,8 +114,8 @@ run port logPath nodeId
                                                         [[show $ peerState peer,
                                                           show $ myNodeId `distanceOrder` nodeId,
                                                           show $ nodeId,
-                                                          show $ now - peerLastSend peer,
-                                                          show $ now - peerLastReply peer]
+                                                          showTimeDiff now (peerLastSend peer),
+                                                          showTimeDiff now (peerLastReply peer)]
                                                          | (nodeId, peer) <- peers]
                                 [] -> return ""
                                 cmd:_ -> return $ "Unknown command " ++ show cmd ++ "\n"
@@ -125,6 +125,8 @@ run port logPath nodeId
                        return ()
          tick
          Ev.loop mgr
+    where showTimeDiff _ 0 = "Never"
+          showTimeDiff now t = show $ now - t
 
 withBuckets :: IORef Buckets -> ServerAction a -> IO a
 withBuckets = refInStateT
