@@ -12,9 +12,9 @@ import System.Environment
 import Data.Maybe (fromMaybe)
 import Control.Monad.Maybe
 import Data.Time.Clock.POSIX
-import Data.List (intercalate)
-import qualified ControlSocket
+import Data.List (intercalate, sortBy)
 
+import qualified ControlSocket
 import EventLog
 import KRPC
 import qualified Node as Node
@@ -26,17 +26,19 @@ data Buckets = Buckets NodeId (Array Int Bucket)
              deriving (Show)
 type Bucket = Map NodeId Peer
 data PeerState = Good | Questionable | Bad
-               deriving (Eq, Show)
+               deriving (Eq, Ord, Show)
 data Peer = Peer { peerState :: PeerState,
                    peerAddress :: SockAddr,
                    peerLastReply :: Time,
                    peerLastSend :: Time
                  }
-            deriving (Show)
+            deriving (Show, Eq)
 type Time = POSIXTime
 type ServerAction a = StateT Buckets IO a
 
 param_n = 160
+param_k = 8
+param_k_nonfull = param_k * 3
 
 -- Startup
 
@@ -183,6 +185,7 @@ isFull
 seen :: NodeId -> SockAddr -> ServerAction ()
 seen nodeId addr
     = do bucket <- getBucket nodeId
+         isMe <- (== nodeId) `liftM` getNodeId
          when (not $ isFull bucket) $
               putBucket nodeId $
               Map.alter update nodeId bucket
@@ -248,7 +251,7 @@ schedule node
                                              then (io, peer { peerState = Bad})
                                              else (io, peer)
                                     ) (return ()) $
-                                    Map.filter ((== Good) . peerState) $ bucket
+                       cutBucket param_k bucket
                    False ->
                        Map.mapAccum (\io peer ->
                                          if peerLastSend peer + queryInterval <= now
@@ -259,12 +262,22 @@ schedule node
                                              then (io, peer { peerState = Bad})
                                              else (io, peer)
                                     ) (return ()) $
-                                    Map.filter (\peer ->
-                                                    not (peerState peer == Bad &&
-                                                         peerLastSend peer + queryInterval <= now)
-                                               ) $ bucket
+                       cutBucket param_k_nonfull bucket
          putBucket n bucket'
          io
+    where cutBucket n bucket
+              | Map.size bucket <= n = bucket
+              | otherwise = Map.fromList $
+                            take n $
+                            sortPeers $
+                            Map.toList bucket
+          sortPeers = sortBy (\(nodeId1, peer1) (nodeId2, peer2) ->
+                                  (peerState peer1 `compare` peerState peer2)
+                                  `compareFurther`
+                                  (peerLastReply peer1 `compare` peerLastReply peer2)
+                             )
+          compareFurther EQ = id
+          compareFurther ord = const ord
 
 sendRequest :: Node.Node -> NodeId -> SockAddr -> ServerAction ()
 sendRequest node target dest
@@ -280,7 +293,9 @@ listBuckets
                              getBucket n >>= \bucket ->
                              if Map.size bucket > 0
                              then return $
-                                  show n ++ ": " ++
+                                  show n ++ (if isFull bucket
+                                             then "*"
+                                             else "") ++ ": " ++
                                        intercalate " " (map showPeer $ Map.toList bucket) ++
                                        "\n"
                              else return ""
