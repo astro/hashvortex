@@ -210,8 +210,8 @@ isFull
 seen :: NodeId -> SockAddr -> ServerAction ()
 seen nodeId addr
     = do bucket <- getBucket nodeId
-         isMe <- (== nodeId) `liftM` getNodeId
-         when (not $ isFull bucket) $
+         isMe <- (nodeId ==) `liftM` getNodeId
+         when (not $ isMe || isFull bucket) $
               putBucket nodeId $
               Map.alter update nodeId bucket
     where update Nothing
