@@ -11,6 +11,8 @@ import Control.Monad.State.Lazy
 import System.Environment
 import Data.Maybe (fromMaybe)
 import Control.Monad.Maybe
+import Data.Time.Clock.POSIX
+import Data.List (intercalate)
 
 import EventLog
 import KRPC
@@ -19,12 +21,17 @@ import NodeId
 import qualified BEncoding as B
 
 data Buckets = Buckets NodeId (Array Int Bucket)
+             deriving (Show)
 type Bucket = Map NodeId Peer
 data PeerState = Good | Questionable | Bad
                deriving (Eq, Show)
 data Peer = Peer { peerState :: PeerState,
-                   peerAddress :: SockAddr
+                   peerAddress :: SockAddr,
+                   peerLastReply :: Time,
+                   peerLastSend :: Time
                  }
+            deriving (Show)
+type Time = POSIXTime
 type ServerAction a = StateT Buckets IO a
 
 param_n = 160
@@ -67,8 +74,15 @@ run port logPath nodeId
                                    handleReply addr reply
                               ) node
          withBuckets refBuckets $
-                     bootstrap "router.bittorrent.com" 6881
+                     bootstrap node "router.bittorrent.com" 6881
 
+         inContext $ get >>= liftIO . print
+
+         let tick = do inContext $ schedule node
+                       -- inContext listBuckets
+                       Ev.registerTimeout mgr 100 tick
+                       return ()
+         tick
          Ev.loop mgr
 
 withBuckets :: IORef Buckets -> ServerAction a -> IO a
@@ -78,26 +92,30 @@ withBuckets refBuckets f
          writeIORef refBuckets buckets'
          return a
 
-bootstrap :: String -> Int -> ServerAction ()
-bootstrap host port
+getNodeId :: ServerAction NodeId
+getNodeId = get >>= \(Buckets nodeId _) -> return nodeId
+
+bootstrap :: Node.Node -> String -> Int -> ServerAction ()
+bootstrap node host port
     = do entryAddrs <- liftIO $ 
                        Node.getAddrs host (show port)
+         myNodeId <- getNodeId
          forM_ entryAddrs $
                   \addr ->
-                      -- TODO: just query
-                      return ()
+                      sendRequest node myNodeId addr
 
 handleQuery :: Logger -> SockAddr -> Query
             -> ServerAction (Either Error Reply)
 handleQuery logger addr query
-    = do let nodeId = case query of
+    = do liftIO $ putStrLn $ "Query from " ++ show addr ++ ": " ++ show query
+         let nodeId = case query of
                         Ping nodeId -> nodeId
                         FindNode nodeId _ -> nodeId
                         GetPeers nodeId _ -> nodeId
                         AnnouncePeer nodeId _ _ _ -> nodeId
          seen nodeId addr
 
-         Buckets myNodeId _ <- get
+         myNodeId <- getNodeId
          let myNodeId' = nodeIdToBuf myNodeId
 
          case query of
@@ -145,10 +163,10 @@ instance BucketIndex Int where
                  buckets // [(n, bucket)]
 instance BucketIndex NodeId where
     getBucket nodeId
-        = do Buckets myNodeId _ <- get
+        = do myNodeId <- getNodeId
              getBucket $ nodeId `distanceOrder` myNodeId
     putBucket nodeId bucket
-        = do Buckets myNodeId _ <- get
+        = do myNodeId <- getNodeId
              putBucket (nodeId `distanceOrder` myNodeId) bucket
 
 isFull :: Bucket -> Bool
@@ -165,7 +183,9 @@ seen nodeId addr
               Map.alter update nodeId bucket
     where update Nothing
               = Just $ Peer { peerState = Questionable,
-                              peerAddress = addr
+                              peerAddress = addr,
+                              peerLastReply = 0,
+                              peerLastSend = 0
                             }
           update (Just peer)
               = Just $ case (peerState peer,
@@ -174,7 +194,9 @@ seen nodeId addr
                          (Good, _) -> peer
                          -- Clear Bad ones with updated address
                          (Bad, False) -> Peer { peerAddress = addr,
-                                                peerState = Questionable
+                                                peerState = Questionable,
+                                                peerLastReply = 0,
+                                                peerLastSend = 0
                                               }
                          -- But others will be updated
                          (_, False) -> peer { peerAddress = addr,
@@ -185,14 +207,78 @@ seen nodeId addr
 
 receivedReply :: NodeId -> SockAddr -> ServerAction ()
 receivedReply nodeId addr
-    = do bucket <- getBucket nodeId
+    = do now <- liftIO getPOSIXTime
+         bucket <- getBucket nodeId
          case Map.lookup nodeId bucket of
            -- Reply from a known peer
            Just peer ->
-               putBucket nodeId $
-                         Map.insert nodeId (peer { peerState = Good }) bucket
+               do liftIO $ putStrLn $ show addr ++ " replied"
+                  putBucket nodeId $
+                            Map.insert nodeId (peer { peerState = Good,
+                                                      peerLastReply = now
+                                                    }) bucket
+           -- Who is this? Do we need this one?
            Nothing ->
-               -- Who is this? Do we need this one?
-               seen nodeId addr
+               do liftIO $ putStrLn $ show addr ++ " replied unexpectedly"
+                  seen nodeId addr
+
+queryInterval = 5 * 60
+timeout = 60
+
+schedule :: Node.Node -> ServerAction ()
+schedule node
+    = liftIO getPOSIXTime >>= \now ->
+      getNodeId >>= \myNodeId ->
+      forM_ [0..param_n] $ \n ->
+      do bucket <- getBucket n
+         let (io, bucket') =
+                 case isFull bucket of
+                   True ->
+                       Map.mapAccum (\io peer ->
+                                         if peerLastSend peer + queryInterval <= now
+                                         then (io >> sendRequest node myNodeId (peerAddress peer),
+                                               peer { peerLastSend = now})
+                                         else
+                                             if peerLastReply peer + timeout <= now
+                                             then (io, peer { peerState = Bad})
+                                             else (io, peer)
+                                    ) (return ()) $
+                                    Map.filter ((== Good) . peerState) $ bucket
+                   False ->
+                       Map.mapAccum (\io peer ->
+                                         if peerLastSend peer + queryInterval <= now
+                                         then (io >> sendRequest node myNodeId (peerAddress peer),
+                                               peer { peerLastSend = now})
+                                         else
+                                             if peerLastReply peer + timeout <= now
+                                             then (io, peer { peerState = Bad})
+                                             else (io, peer)
+                                    ) (return ()) $
+                                    Map.filter (\peer ->
+                                                    not (peerState peer == Bad &&
+                                                         peerLastSend peer + queryInterval <= now)
+                                               ) $ bucket
+         putBucket n bucket'
+         io
+
+sendRequest :: Node.Node -> NodeId -> SockAddr -> ServerAction ()
+sendRequest node target dest
+    = do myNodeId <- getNodeId
+         let query = FindNode myNodeId target
+         liftIO $ putStrLn $ "Sending request to " ++ show dest ++ " for " ++ show target
+         liftIO $ Node.sendQueryNoWait dest query node
+
+listBuckets :: ServerAction ()
+listBuckets
+    = do liftIO $ putStrLn "Buckets:"
+         forM_ [0..param_n] $ \n ->
+             do bucket <- getBucket n
+                when (Map.size bucket > 0) $
+                     liftIO $ putStrLn $
+                            show n ++ ": " ++ intercalate ", "
+                                     (map showPeer $ Map.toList bucket)
+    where showPeer (nodeId, peer)
+              = show (peerAddress peer) ++
+                "[" ++ show (peerState peer) ++ "]"
 
 (?<) = B.bdictLookup
