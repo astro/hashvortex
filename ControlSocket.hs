@@ -1,4 +1,4 @@
-module ControlSocket where
+module ControlSocket (listenSocket) where
 
 import Data.IORef
 import Control.Monad.State.Lazy
@@ -24,7 +24,7 @@ acceptClient mgr serv handler _key _ev
     = do (sock, _) <- accept serv
          refCtx <- newIORef $ Context handler sock ""
          let f _key _ev = refInStateT refCtx $ readClient
-         Ev.registerFd mgr f (fromIntegral $ fdSocket serv) Ev.evtRead
+         Ev.registerFd mgr f (fromIntegral $ fdSocket sock) Ev.evtRead
          return ()
 
 readClient :: StateT Client IO ()
@@ -36,7 +36,7 @@ readClient
          case break breaks buf'' of
            (line, c:rest)
              | breaks c ->
-                 do liftIO $ handler $ words line
+                 do liftIO $ handler (words line) >>= send sock
                     put $ Context handler sock rest
            _ ->
                put $ Context handler sock buf''
