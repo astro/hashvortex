@@ -12,7 +12,7 @@ import System.Environment
 import Data.Maybe (fromMaybe)
 import Control.Monad.Maybe
 import Data.Time.Clock.POSIX
-import Data.List (intercalate, sortBy)
+import Data.List (intercalate, sortBy, groupBy)
 import Data.Ix (inRange)
 import Text.Tabular
 import qualified Text.Tabular.AsciiArt as AA
@@ -89,23 +89,36 @@ run port logPath nodeId
                               case command of
                                 ["buckets"] ->
                                     listBuckets
-                                ["nodeId"] ->
+                                ["nodeid"] ->
                                     (++ "\n") `liftM` show `liftM` getNodeId
                                 ["peers"] ->
-                                    do myNodeId <- getNodeId
+                                    do now <- liftIO $ getPOSIXTime
+                                       myNodeId <- getNodeId
                                        Buckets _ buckets <- get
                                        let peers = concatMap Map.toList $ elems buckets
                                        return $ AA.render id id id $
-                                              Table (Group SingleLine $ map (Header . show . peerAddress . snd) peers)
+                                              Table (Group SingleLine $
+                                                           map (Group NoLine) $
+                                                           map (map $ Header . show . peerAddress . snd) $
+                                                           groupBy (\(nodeId1, _) (nodeId2, _) ->
+                                                                        (myNodeId `distanceOrder` nodeId1)
+                                                                        ==
+                                                                        (myNodeId `distanceOrder` nodeId2)
+                                                                   ) $
+                                                           peers)
                                                         (Group SingleLine [Header "State",
                                                                            Header "Dist",
-                                                                           Header "NodeId"])
+                                                                           Header "NodeId",
+                                                                           Header "Last send",
+                                                                           Header "Last reply"])
                                                         [[show $ peerState peer,
                                                           show $ myNodeId `distanceOrder` nodeId,
-                                                          show $ nodeId]
+                                                          show $ nodeId,
+                                                          show $ now - peerLastSend peer,
+                                                          show $ now - peerLastReply peer]
                                                          | (nodeId, peer) <- peers]
                                 [] -> return ""
-                                cmd:_ -> return $ "Unknown command " ++ show cmd
+                                cmd:_ -> return $ "Unknown command " ++ show cmd ++ "\n"
 
          let tick = do inContext $ schedule node
                        Ev.registerTimeout mgr 100 tick
