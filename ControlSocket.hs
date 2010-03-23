@@ -23,7 +23,9 @@ data Client = Context ControlHandler Socket String
 acceptClient mgr serv handler _key _ev
     = do (sock, _) <- accept serv
          refCtx <- newIORef $ Context handler sock ""
-         let f _key _ev = refInStateT refCtx $ readClient
+         let f key _ev = catch (refInStateT refCtx $ readClient) $
+                         const (Ev.unregisterFd mgr key >>
+                                sClose sock)
          Ev.registerFd mgr f (fromIntegral $ fdSocket sock) Ev.evtRead
          return ()
 
