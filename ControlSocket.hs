@@ -4,6 +4,7 @@ import Data.IORef
 import Control.Monad.State.Lazy
 import qualified System.Event as Ev
 import Network.Socket
+import System.Directory (removeFile)
 
 import InState
 
@@ -12,7 +13,8 @@ type ControlHandler = [String] -> IO String
 
 listenSocket :: Ev.EventManager -> FilePath -> ControlHandler -> IO ()
 listenSocket mgr path handler
-    = do serv <- socket AF_UNIX Stream defaultProtocol
+    = do removeFile path
+         serv <- socket AF_UNIX Stream defaultProtocol
          bindSocket serv (SockAddrUnix path)
          listen serv 0
          Ev.registerFd mgr (acceptClient mgr serv handler) (fromIntegral $ fdSocket serv) Ev.evtRead
