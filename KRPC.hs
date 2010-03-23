@@ -141,9 +141,9 @@ decodeNodes = let step = remaining >>= \remaining ->
                                 ((id, addr):) `liftM` step
               in runGet step
 
-encodeNodes :: [(SockAddr, NodeId)] -> W8.ByteString
+encodeNodes :: [(NodeId, SockAddr)] -> W8.ByteString
 encodeNodes = runPut . mapM_
-              (\(SockAddrInet port ip, nodeId) ->
+              (\(nodeId, SockAddrInet port ip) ->
                    do putLazyByteString $ nodeIdToBuf nodeId
                       putWord32host ip
                       putWord16be $ fromIntegral port

@@ -13,6 +13,7 @@ import Data.Maybe (fromMaybe)
 import Control.Monad.Maybe
 import Data.Time.Clock.POSIX
 import Data.List (intercalate, sortBy)
+import Data.Ix (inRange)
 
 import qualified ControlSocket
 import EventLog
@@ -131,11 +132,13 @@ handleQuery logger addr query
                       Right $
                       B.bdict [("id", B.BString myNodeId')]
            FindNode nodeId target ->
-               return $
-                      Right $
-                      B.bdict [("id", B.BString myNodeId'),
-                               ("nodes", B.BString C.empty)  -- TODO
-                              ]
+               do nodes <- take 8 `liftM` selectNodesFor target
+                  liftIO $ putStrLn $ "Selected for " ++ show target ++ ":\n" ++ show nodes
+                  return $
+                         Right $
+                         B.bdict [("id", B.BString myNodeId'),
+                                  ("nodes", B.BString $ encodeNodes nodes)
+                                 ]
            _ ->
                return $
                       Left $
@@ -175,6 +178,26 @@ instance BucketIndex NodeId where
     putBucket nodeId bucket
         = do myNodeId <- getNodeId
              putBucket (nodeId `distanceOrder` myNodeId) bucket
+
+selectNodesFor :: NodeId -> ServerAction [(NodeId, SockAddr)]
+selectNodesFor target
+    = do d <- distanceOrder target `liftM` getNodeId
+         concat `liftM`
+                mapM (\n ->
+                          map (\(nodeId, peer) ->
+                                    (nodeId, peerAddress peer)
+                              ) `liftM`
+                          sortBy (\(nodeId1, peer1) (nodeId2, peer2) ->
+                                      (target <-> nodeId1) `compare`
+                                                               (target <-> nodeId2)
+                                 ) `liftM`
+                          filter (\(nodeId, peer) ->
+                                      peerState peer == Good
+                                 ) `liftM`
+                          Map.toList `liftM`
+                          getBucket n
+                     ) (filter (inRange (0, param_n)) $
+                        reverse [0..d] ++ [(d + 1)..160])
 
 isFull :: Bucket -> Bool
 isFull
