@@ -55,7 +55,7 @@ writeUntilNow f now
 writeEvents :: Handle -> LoggerAction ()
 writeEvents f
     = do st <- get
-         liftIO $ hPutStrLn f $ intercalate " " $ show (stNow st) : map show (elems $ stEvents st)
+         liftIO $ hPutStrLn f $ intercalate " " $ init (show $ stNow st) : map show (elems $ stEvents st)
          put $ st { stEvents = newEvents }
 
 newEvents :: Events
