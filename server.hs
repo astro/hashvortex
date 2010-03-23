@@ -87,11 +87,12 @@ run port logPath nodeId
                               case command of
                                 ["buckets"] ->
                                     listBuckets
+                                ["nodeId"] ->
+                                    show `liftM` getNodeId
                                 [] -> return ""
                                 cmd:_ -> return $ "Unknown command " ++ show cmd
 
          let tick = do inContext $ schedule node
-                       -- inContext listBuckets
                        Ev.registerTimeout mgr 100 tick
                        return ()
          tick
