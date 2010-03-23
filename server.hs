@@ -247,7 +247,8 @@ schedule node
                                          then (io >> sendRequest node myNodeId (peerAddress peer),
                                                peer { peerLastSend = now})
                                          else
-                                             if peerLastReply peer + timeout <= now
+                                             if peerLastSend peer > peerLastReply peer &&
+                                                peerLastReply peer + timeout <= now
                                              then (io, peer { peerState = Bad})
                                              else (io, peer)
                                     ) (return ()) $
