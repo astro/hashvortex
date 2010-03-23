@@ -19,6 +19,7 @@ import KRPC
 import qualified Node as Node
 import NodeId
 import qualified BEncoding as B
+import InState
 
 data Buckets = Buckets NodeId (Array Int Bucket)
              deriving (Show)
@@ -86,11 +87,7 @@ run port logPath nodeId
          Ev.loop mgr
 
 withBuckets :: IORef Buckets -> ServerAction a -> IO a
-withBuckets refBuckets f
-    = do buckets <- readIORef refBuckets
-         (a, buckets') <- runStateT f buckets
-         writeIORef refBuckets buckets'
-         return a
+withBuckets = refInStateT
 
 getNodeId :: ServerAction NodeId
 getNodeId = get >>= \(Buckets nodeId _) -> return nodeId
