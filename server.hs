@@ -25,7 +25,7 @@ import NodeId
 import qualified BEncoding as B
 import InState
 
-data Buckets = Buckets NodeId (Array Int Bucket)
+data ServerState = Server NodeId (Array Int Bucket)
              deriving (Show)
 type Bucket = Map NodeId Peer
 data PeerState = Good | Questionable | Bad
@@ -37,7 +37,7 @@ data Peer = Peer { peerState :: PeerState,
                  }
             deriving (Show, Eq)
 type Time = POSIXTime
-type ServerAction a = StateT Buckets IO a
+type ServerAction a = StateT ServerState IO a
 
 param_n = 160
 param_k = 8
@@ -67,25 +67,25 @@ run port logPath nodeId
          mgr <- Ev.new
          node <- Node.new mgr port
 
-         refBuckets <- newIORef $
-                       Buckets nodeId $
-                       array (0, param_n) $
-                       zip [0..param_n]  $ repeat Map.empty
-         let inContext = withBuckets refBuckets
+         refServer <- newIORef $
+                       Server nodeId (array (0, param_n) $
+                                      zip [0..param_n]  $ repeat Map.empty)
+         let inContext = withServer refServer
          Node.setQueryHandler (\addr query ->
-                                   withBuckets refBuckets $
+                                   withServer refServer $
                                    handleQuery log addr query
                               ) node
          Node.setReplyHandler (\addr reply ->
-                                   withBuckets refBuckets $
+                                   withServer refServer $
                                    handleReply addr reply
                               ) node
-         withBuckets refBuckets $
+         withServer refServer $
                      bootstrap node "router.bittorrent.com" 6881
 
          ControlSocket.listenSocket mgr "server.sock" $
                           \command ->
-                              withBuckets refBuckets $
+
+                              withServer refServer $
                               case command of
                                 ["buckets"] ->
                                     listBuckets
@@ -94,7 +94,7 @@ run port logPath nodeId
                                 ["peers"] ->
                                     do now <- liftIO $ getPOSIXTime
                                        myNodeId <- getNodeId
-                                       Buckets _ buckets <- get
+                                       Server _ buckets <- get
                                        let peers = concatMap Map.toList $ elems buckets
                                        return $ AA.render id id id $
                                               Table (Group SingleLine $
@@ -128,11 +128,11 @@ run port logPath nodeId
     where showTimeDiff _ 0 = "Never"
           showTimeDiff now t = show $ now - t
 
-withBuckets :: IORef Buckets -> ServerAction a -> IO a
-withBuckets = refInStateT
+withServer :: IORef ServerState -> ServerAction a -> IO a
+withServer = refInStateT
 
 getNodeId :: ServerAction NodeId
-getNodeId = get >>= \(Buckets nodeId _) -> return nodeId
+getNodeId = get >>= \(Server nodeId _) -> return nodeId
 
 bootstrap :: Node.Node -> String -> Int -> ServerAction ()
 bootstrap node host port
@@ -198,12 +198,11 @@ class BucketIndex a where
     putBucket :: a -> Bucket -> ServerAction ()
 instance BucketIndex Int where
     getBucket n
-        = do Buckets _ buckets <- get
+        = do Server _ buckets <- get
              return $ buckets ! n
     putBucket n bucket
-        = do Buckets nodeId buckets <- get
-             put $ Buckets nodeId $
-                 buckets // [(n, bucket)]
+        = do Server nodeId buckets <- get
+             put $ Server nodeId (buckets // [(n, bucket)])
 instance BucketIndex NodeId where
     getBucket nodeId
         = do myNodeId <- getNodeId
