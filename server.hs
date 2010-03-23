@@ -13,6 +13,7 @@ import Data.Maybe (fromMaybe)
 import Control.Monad.Maybe
 import Data.Time.Clock.POSIX
 import Data.List (intercalate)
+import qualified ControlSocket
 
 import EventLog
 import KRPC
@@ -77,7 +78,14 @@ run port logPath nodeId
          withBuckets refBuckets $
                      bootstrap node "router.bittorrent.com" 6881
 
-         inContext $ get >>= liftIO . print
+         ControlSocket.listenSocket mgr "server.sock" $
+                          \command ->
+                              withBuckets refBuckets $
+                              case command of
+                                ["buckets"] ->
+                                    listBuckets
+                                [] -> return ""
+                                cmd:_ -> return $ "Unknown command " ++ show cmd
 
          let tick = do inContext $ schedule node
                        -- inContext listBuckets
@@ -265,17 +273,21 @@ sendRequest node target dest
          liftIO $ putStrLn $ "Sending request to " ++ show dest ++ " for " ++ show target
          liftIO $ Node.sendQueryNoWait dest query node
 
-listBuckets :: ServerAction ()
+listBuckets :: ServerAction String
 listBuckets
-    = do liftIO $ putStrLn "Buckets:"
-         forM_ [0..param_n] $ \n ->
-             do bucket <- getBucket n
-                when (Map.size bucket > 0) $
-                     liftIO $ putStrLn $
-                            show n ++ ": " ++ intercalate ", "
-                                     (map showPeer $ Map.toList bucket)
+    = concat `liftM`
+      forM [0..param_n] (\n ->
+                             getBucket n >>= \bucket ->
+                             if Map.size bucket > 0
+                             then return $
+                                  show n ++ ": " ++
+                                       intercalate " " (map showPeer $ Map.toList bucket) ++
+                                       "\n"
+                             else return ""
+                        )
     where showPeer (nodeId, peer)
-              = show (peerAddress peer) ++
-                "[" ++ show (peerState peer) ++ "]"
+              = showAddress (peerAddress peer) ++
+                "[" ++ take 1 (show $ peerState peer) ++ "]"
+          showAddress = fst . break (== ':') . show
 
 (?<) = B.bdictLookup
