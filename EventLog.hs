@@ -47,6 +47,7 @@ writeUntilNow f now
       in if nextInterval <= now
          then -- One interval step
               writeEvents f >>
+              get >>= \st ->
               put (st { stNow = nextInterval }) >>
               -- Loop
               writeUntilNow f now
