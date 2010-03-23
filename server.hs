@@ -52,19 +52,33 @@ main = do args <- getArgs
             [portS, logPath] ->
                 do nodeId <- makeRandomNodeId
                    putStrLn $ "Random nodeId: " ++ show nodeId
-                   run (read portS) logPath nodeId
+                   run (read portS) logPath nodeId []
             [portS, logPath, torrentFile] ->
-                do infoHash <- (fromMaybe $ error "No infohash") `liftM`
-                               runMaybeT (MaybeT (B.parseFile torrentFile) >>=
-                                          MaybeT . B.infoHash)
+                do metaInfo <- (fromMaybe $ error "Unable to metainfo file") `liftM`
+                               runMaybeT (MaybeT (B.parseFile torrentFile))
+                   infoHash <- (fromMaybe $ error "No infohash") `liftM`
+                               runMaybeT (MaybeT $ B.infoHash metaInfo)
+                   let bootstrapNodes = fromMaybe [] $
+                                        do B.BList nodes <- metaInfo ?< "nodes"
+                                           return $
+                                                 map (\(B.BList [B.BString host, B.BInteger port]) ->
+                                                          (C.unpack host, port)
+                                                     ) $
+                                                 filter (\node ->
+                                                             case node of
+                                                               B.BList [B.BString _, B.BInteger _] ->
+                                                                   True
+                                                               _ ->
+                                                                   False
+                                                        ) nodes
                    let nodeId = makeNodeId infoHash
                    putStrLn $ "Extracted infoHash: " ++ show nodeId
-                   run (read portS) logPath nodeId
+                   run (read portS) logPath nodeId bootstrapNodes
             _ ->
                 do progName <- getProgName
                    putStrLn $ "Usage: " ++ progName ++ " <port> <log-path> [node-id-source.torrent]"
 
-run port logPath nodeId
+run port logPath nodeId bootstrapNodes
     = do log <- newLog 1.0 logPath
          mgr <- Ev.new
          node <- Node.new mgr port
@@ -82,7 +96,14 @@ run port logPath nodeId
                                    handleReply addr reply
                               ) node
          withServer refServer $
-                     bootstrap node "router.bittorrent.com" 6881
+                    case bootstrapNodes of
+                      [] ->
+                          do liftIO $ putStrLn "No bootstrap nodes, using router.bittorrent.com"
+                             bootstrap node "router.bittorrent.com" 6881
+                      _ ->
+                          do liftIO $ putStrLn $ "Bootstrap nodes: " ++ show bootstrapNodes
+                             forM_ bootstrapNodes $ \(host, port) ->
+                                 bootstrap node host port
 
          ControlSocket.listenSocket mgr "server.sock" $
                           \command ->
@@ -163,7 +184,7 @@ withServer = refInStateT
 getNodeId :: ServerAction NodeId
 getNodeId = get >>= \(Server nodeId _ _ _) -> return nodeId
 
-bootstrap :: Node.Node -> String -> Int -> ServerAction ()
+bootstrap :: Node.Node -> String -> Integer -> ServerAction ()
 bootstrap node host port
     = do entryAddrs <- liftIO $ 
                        Node.getAddrs host (show port)
