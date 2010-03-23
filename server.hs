@@ -61,7 +61,7 @@ main = do args <- getArgs
                    putStrLn $ "Usage: " ++ progName ++ " <port> <log-path> [node-id-source.torrent]"
 
 run port logPath nodeId
-    = do log <- newLog 1.0 "spoofer.data"
+    = do log <- newLog 1.0 logPath
          mgr <- Ev.new
          node <- Node.new mgr port
 
@@ -114,8 +114,10 @@ bootstrap node host port
 
 handleQuery :: Logger -> SockAddr -> Query
             -> ServerAction (Either Error Reply)
-handleQuery logger addr query
+handleQuery log addr query
     = do liftIO $ putStrLn $ "Query from " ++ show addr ++ ": " ++ show query
+         liftIO $ log query
+
          let nodeId = case query of
                         Ping nodeId -> nodeId
                         FindNode nodeId _ -> nodeId
