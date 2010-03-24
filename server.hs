@@ -49,11 +49,11 @@ param_k_nonfull = param_k * 3
 
 main = do args <- getArgs
           case args of
-            [portS, logPath] ->
+            [portS, logPath, ctlPath] ->
                 do nodeId <- makeRandomNodeId
                    putStrLn $ "Random nodeId: " ++ show nodeId
-                   run (read portS) logPath nodeId []
-            [portS, logPath, torrentFile] ->
+                   run (read portS) logPath ctlPath nodeId []
+            [portS, logPath, ctlPath, torrentFile] ->
                 do metaInfo <- (fromMaybe $ error "Unable to metainfo file") `liftM`
                                runMaybeT (MaybeT (B.parseFile torrentFile))
                    infoHash <- (fromMaybe $ error "No infohash") `liftM`
@@ -73,12 +73,12 @@ main = do args <- getArgs
                                                         ) nodes
                    let nodeId = makeNodeId infoHash
                    putStrLn $ "Extracted infoHash: " ++ show nodeId
-                   run (read portS) logPath nodeId bootstrapNodes
+                   run (read portS) logPath ctlPath nodeId bootstrapNodes
             _ ->
                 do progName <- getProgName
-                   putStrLn $ "Usage: " ++ progName ++ " <port> <log-path> [node-id-source.torrent]"
+                   putStrLn $ "Usage: " ++ progName ++ " <port> <log-path> <ctl-path> [node-id-source.torrent]"
 
-run port logPath nodeId bootstrapNodes
+run port logPath ctlPath nodeId bootstrapNodes
     = do log <- newLog 1.0 logPath
          mgr <- Ev.new
          node <- Node.new mgr port
@@ -105,7 +105,7 @@ run port logPath nodeId bootstrapNodes
                              forM_ bootstrapNodes $ \(host, port) ->
                                  bootstrap node host port
 
-         ControlSocket.listenSocket mgr "server.sock" $
+         ControlSocket.listenSocket mgr ctlPath $
                           \command ->
 
                               withServer refServer $
