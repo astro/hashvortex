@@ -13,7 +13,7 @@ type ControlHandler = [String] -> IO String
 
 listenSocket :: Ev.EventManager -> FilePath -> ControlHandler -> IO ()
 listenSocket mgr path handler
-    = do removeFile path
+    = do catch (removeFile path) (const $ return ())
          serv <- socket AF_UNIX Stream defaultProtocol
          bindSocket serv (SockAddrUnix path)
          listen serv 0
