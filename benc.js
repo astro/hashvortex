@@ -65,9 +65,9 @@ module.exports = {
 
 			var contents = module.exports.parse(data);
 			sys.puts(JSON.stringify(contents));
-			if (module.exports.encode(contents) != data.toString()) {
-			    sys.puts("Expected: " + JSON.stringify(data.toString().slice(0, 1024)));
-			    sys.puts("Encoded: " + JSON.stringify(module.exports.encode(contents).slice(0, 1024)));
+			if (module.exports.toBuffer(contents).toString() != data.toString()) {
+			    sys.puts("Expected: " + data.slice(0, 1024));
+			    sys.puts("Encoded: " + module.exports.toBuffer(contents).slice(0, 1024));
 			}
 		    });
     },
@@ -105,6 +105,44 @@ module.exports = {
 	    dest.write('e');
 	    break;
 	}
+    },
+    encodedLength: function(obj) {
+	switch(obj.type) {
+	case 'number':
+	    return 2 + obj.toString().length;
+	case 'string':
+	    var buf = new Buffer(obj, 'binary');
+	    return 1 + buf.length.toString().length + buf.length;
+	case 'buffer':
+	    return 1 + obj.length.toString().length + obj.length;
+	case 'array':
+	    return obj.reduce(function(len, el) {
+		return module.exports.encodedLength(el) + len;
+	    }, 2);
+	default:
+	    var len = 2;
+	    for(var k in obj) {
+		len += module.exports.encodedLength(k) +
+		    module.exports.encodedLength(obj[k]);
+	    }
+	    return len;
+	}
+    },
+    toBuffer: function(obj) {
+	var buf = new Buffer(module.exports.encodedLength(obj));
+	var offset = 0;
+
+	module.exports.write(obj,
+			     { write: function(s) {
+				 if (s.type === 'string')
+				     buf.write(s, offset);
+				 else if (s.type === 'buffer')
+				     s.copy(buf, offset, 0, s.length);
+				 else
+				     throw 'Cannot write ' + s.type;
+				 offset += s.length;
+			     } });
+	return buf;
     },
     encode: function(obj) {
 	var result = '';
