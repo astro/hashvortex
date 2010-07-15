@@ -111,7 +111,7 @@ module.exports = {
 	case 'number':
 	    return 2 + obj.toString().length;
 	case 'string':
-	    var buf = new Buffer(obj, 'binary');
+	    var buf = new Buffer(obj, 'utf8');
 	    return 1 + buf.length.toString().length + buf.length;
 	case 'buffer':
 	    return 1 + obj.length.toString().length + obj.length;
@@ -134,10 +134,12 @@ module.exports = {
 
 	module.exports.write(obj,
 			     { write: function(s) {
+				 //console.log('s: '+offset+'+'+s.length+' buflen: '+buf.length);
 				 if (s.type === 'string')
-				     buf.write(s, offset);
-				 else if (s.type === 'buffer')
+				     buf.write(s, offset, 'binary');
+				 else if (s.type === 'buffer') {
 				     s.copy(buf, offset, 0, s.length);
+				 }
 				 else
 				     throw 'Cannot write ' + s.type;
 				 offset += s.length;

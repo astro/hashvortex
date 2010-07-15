@@ -17,27 +17,25 @@ var Node = function(port) {
 sys.inherits(Node, EventEmitter);
 
 Node.prototype.onMsg = function(msg, rinfo) {
-    console.log("connection: " + rinfo.address + ":"+ rinfo.port);
-    console.log("server got: " + msg);
-
     try {
 	var pkt = BEnc.parse(msg);
 
 	if (pkt.y.toString() == 'q' &&
 	    pkt.q && pkt.a) {
-	    var reply = this.emit('query', rinfo.address, rinfo.port, pkt);
-	    if (typeof reply == 'object') {
+	    var self = this;
+	    function replySender(reply) {
 		var rpkt = { t: pkt.t,
 			     q: 'r',
 			     r: reply };
-		this.send(rinfo.address, rinfo.port, rpkt);
+		self.send(rinfo.address, rinfo.port, rpkt);
 	    }
+	    this.emit('query', rinfo.address, rinfo.port, pkt, replySender);
 	} else if (pkt.y.toString() == 'r' &&
 		   pkt.r) {
 	    this.emit('reply', rinfo.address, rinfo.port, pkt);
 	}
     } catch(e) {
-	console.log(e.stack());
+	console.log(e);
     }
 };
 
