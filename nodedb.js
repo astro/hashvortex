@@ -17,8 +17,13 @@ module.exports = {
 	    ary = db[node.nodeid[0]] = [];
 
 	node.lastSeen = Date.now();
-	if (!ary.some(nodeEq(node)))
+	oldNodes = ary.filter(nodeEq(node));
+	if (oldNodes[0]) {
+	    oldNodes[0].lastSeen = Date.now();
+	} else {
+	    node.lastSeen = Date.now();
 	    ary.push(node);
+	}
     },
     findNode: function(node) {
 	var ary = db[node.nodeid[0]];
@@ -51,3 +56,30 @@ module.exports = {
 	return result.slice(0, 8);
     }
 };
+
+var PURGE_INTERVAL = 100;
+function purge(n) {
+    //console.log("purge "+n);
+    if (!n) {
+	setTimeout(function() {
+		       purge(PURGE_INTERVAL);
+		   }, 1000);
+    } else if (n > 160)
+        purge();
+    else {
+	var ary = db[n];
+	if (ary) {
+	    var now = Date.now();
+	    //console.log("purge < "+ary.length);
+	    db[n] = ary.filter(function(node) {
+				   return node.lastSeen > now - 600000 ||
+				       node.lastReply > now - 900000;
+			       });
+	    //console.log("purge > "+db[n].length);
+	}
+	setTimeout(function() {
+		   purge(n + 1);
+		   }, PURGE_INTERVAL);
+    }
+}
+purge();
