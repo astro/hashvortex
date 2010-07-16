@@ -68,8 +68,8 @@ node.on('query', function(addr, port, pkt, reply) {
 
     switch(pkt.q.toString()) {
     case 'ping':
-	if (pkt.a.nodeid)
-	    reply({ id: myNearestNodeId(pkt.a.nodeid) });
+	if (pkt.a.id)
+	    reply({ id: myNearestNodeId(pkt.a.nodeid) || pkt.a.id });
 	break;
     case 'find_node':
 	if (pkt.a.id && myNearestNodeId(pkt.a.id) == pkt.a.id)
@@ -78,20 +78,20 @@ node.on('query', function(addr, port, pkt, reply) {
 	if (pkt.a.target) {
 	    console.log('find_node ' + NodeId.toString(pkt.a.target));
 	    var nodes = NodeDB.nearest(pkt.a.target);
-	    reply({ id: myNearestNodeId(pkt.a.target),
+	    reply({ id: myNearestNodeId(pkt.a.target) || pkt.a.target,
 		    nodes: encodeNodes(nodes) });
 	}
 	break;
     case 'get_peers':
 	console.log('get_peers ' + NodeId.toString(pkt.a.info_hash));
-	reply({ id: pkt.a.info_hash || nodeid,
+	reply({ id: myNearestNodeId(pkt.a.info_hash) || pkt.a.info_hash,
 		token: token,
 		values: targets });
 	break;
     case 'announce_peer':
 	if (pkt.a.info_hash) {
 	    console.log('announce_peer ' + NodeId.toString(pkt.a.info_hash));
-	    reply({ id: pkt.a.info_hash });
+	    reply({ id: myNearestNodeId(pkt.a.info_hash) || pkt.a.info_hash });
 	}
 	break;
     }
