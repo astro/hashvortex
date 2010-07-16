@@ -56,7 +56,6 @@ module.exports = {
 
 var PURGE_INTERVAL = 100;
 function purge(n) {
-    //console.log("purge "+n);
     if (!n) {
 	setTimeout(function() {
 		       purge(PURGE_INTERVAL);
@@ -67,12 +66,14 @@ function purge(n) {
 	var ary = db[n];
 	if (ary) {
 	    var now = Date.now();
-	    //console.log("purge < "+ary.length);
+	    var before = ary.length;
 	    db[n] = ary.filter(function(node) {
 				   return node.lastSeen > now - 600000 ||
 				       node.lastReply > now - 900000;
 			       });
-	    //console.log("purge > "+db[n].length);
+	    var after = db[0].length;
+	    if (before != after)
+		console.log("purged " + (before - after) + " from bucket " + n);
 	}
 	setTimeout(function() {
 		   purge(n + 1);
