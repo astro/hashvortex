@@ -29,10 +29,10 @@ module.exports = {
 	var ary = db[node.nodeid[0]];
 	return ary ? ary.filter(nodeEq(node))[0] : null;
     },
-    nearest: function(nodeid) {
+    nearest: function(nodeid, amount) {
 	result = [];
 	var n = nodeid[0];
-	for(var i = 0; i < 256; i++) {
+	for(var i = 0; result.length < amount && i < 256; i++) {
 	    if (db[n + i]) {
 		db[n + i].forEach(function(node) {
 		    result.push(node);
@@ -43,9 +43,6 @@ module.exports = {
 		    result.push(node);
 		});
 	    }
-
-	    if (result.length >= 8)
-		break;
 	}
 
 	result = result.sort(function(nodeA, nodeB) {
@@ -53,7 +50,7 @@ module.exports = {
 	    var distB = NodeId.distance(nodeid, nodeB);
 	    return distA - distB;
 	});
-	return result.slice(0, 8);
+	return result.slice(0, amount);
     }
 };
 

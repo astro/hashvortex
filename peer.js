@@ -77,7 +77,7 @@ node.on('query', function(addr, port, pkt, reply) {
 
 	if (pkt.a.target) {
 	    console.log('find_node ' + NodeId.toString(pkt.a.target));
-	    var nodes = NodeDB.nearest(pkt.a.target);
+	    var nodes = NodeDB.nearest(pkt.a.target, 8);
 	    reply({ id: myNearestNodeId(pkt.a.target) || pkt.a.target,
 		    nodes: encodeNodes(nodes) });
 	}
@@ -134,7 +134,7 @@ function Peer(nodeid) {
 
 Peer.prototype = {
     settle: function() {
-	var dests = NodeDB.nearest(this.nodeid);
+	var dests = NodeDB.nearest(this.nodeid, 4);
 	if (dests.length < 1)
 	    dests = [{ addr: 'router.bittorrent.com',
 		       port: 6881
