@@ -58,15 +58,17 @@ function myNearestNodeId(nodeid) {
 }
 
 var node = new KRPC.Node(10000);
-var queryCnt = 0, replyCnt = 0;
+var queryStats = {}, replyCnt = 0;
 var token = new Buffer('a');
 var targets = [new Buffer([87, 106, 131, 203, 0, 80]),
 	       new Buffer([87, 106, 131, 203, 0, 87])];
 node.on('query', function(addr, port, pkt, reply) {
     var t1 = Date.now();
-    queryCnt++;
+    var q = pkt.q.toString();
+    queryStats[q] = queryStats[q] || 0;
+    queryStats[q]++;
 
-    switch(pkt.q.toString()) {
+    switch(q) {
     case 'ping':
 	if (pkt.a.id)
 	    reply({ id: myNearestNodeId(pkt.a.nodeid) || pkt.a.id });
@@ -119,10 +121,14 @@ node.on('reply', function(addr, port, pkt) {
     if (node)
 	node.lastReply = Date.now();
 });
+var lastStats;
 setInterval(function() {
-    console.log(queryCnt + ' queries/s, ' + replyCnt + ' replies/s');
-    queryCnt = 0;
+    now = Date.now();
+    console.log((lastStats ? 'in ' + (now - lastStats) + ' ms' : 'start') + ': ' +
+		JSON.stringify(queryStats) + '; ' + replyCnt + ' replies');
+    queryStats = {};
     replyCnt = 0;
+    lastStats = now;
 }, 1000);
 
 function Peer(nodeid) {
