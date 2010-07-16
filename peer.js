@@ -4,10 +4,10 @@ var NodeId = require('./nodeid');
 var NodeDB = require('./nodedb');
 
 
-/*process.on('uncaughtException',
+process.on('uncaughtException',
 	   function(e) {
-	       console.log(e);
-	   });*/
+	       console.log(e.stack);
+	   });
 
 function decodeNodes(buf) {
     var result = [];

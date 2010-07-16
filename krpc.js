@@ -20,7 +20,7 @@ Node.prototype.onMsg = function(msg, rinfo) {
     try {
 	var pkt = BEnc.parse(msg);
 
-	if (pkt.y.toString() == 'q' &&
+	if (pkt.y && pkt.y.toString() == 'q' &&
 	    pkt.q && pkt.a) {
 	    var self = this;
 	    function replySender(reply) {
@@ -30,12 +30,12 @@ Node.prototype.onMsg = function(msg, rinfo) {
 		self.send(rinfo.address, rinfo.port, rpkt);
 	    }
 	    this.emit('query', rinfo.address, rinfo.port, pkt, replySender);
-	} else if (pkt.y.toString() == 'r' &&
+	} else if (pkt.y && pkt.y.toString() == 'r' &&
 		   pkt.r) {
 	    this.emit('reply', rinfo.address, rinfo.port, pkt);
 	}
     } catch(e) {
-	console.log(e);
+	console.log(e.stack);
     }
 };
 
