@@ -19,7 +19,7 @@ module.exports = {
 
     parseMagnet: function(url) {
 	var m;
-	if ((m = url.toLowerCase().match(/^magnet:\?xt=urn:btih:(.+?)\&/))) {
+	if ((m = url.toLowerCase().match(/^magnet:\?xt=urn:btih:([0-9a-fA-F]+)/))) {
 	    var bytes = [];
 	    for(i = 0; i < m[1].length; i += 2) {
 		var a = hexChar(m[1][i]);
