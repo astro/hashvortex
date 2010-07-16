@@ -79,10 +79,14 @@ module.exports = {
 	    dest.write('e');
 	    break;
 	case 'string':
-	    var buf = new Buffer(obj, 'binary');
-	    dest.write(buf.length.toString());
-	    dest.write(':');
-	    dest.write(buf);
+	    if (obj === '')
+		dest.write('0:');
+	    else {
+		var buf = new Buffer(obj, 'binary');
+		dest.write(buf.length.toString());
+		dest.write(':');
+		dest.write(buf);
+	    }
 	    break;
 	case 'buffer':
 	    dest.write(obj.length.toString());
@@ -106,45 +110,34 @@ module.exports = {
 	    break;
 	}
     },
-    encodedLength: function(obj) {
-	switch(obj.type) {
-	case 'number':
-	    return 2 + obj.toString().length;
-	case 'string':
-	    var buf = new Buffer(obj, 'utf8');
-	    return 1 + buf.length.toString().length + buf.length;
-	case 'buffer':
-	    return 1 + obj.length.toString().length + obj.length;
-	case 'array':
-	    return obj.reduce(function(len, el) {
-		return module.exports.encodedLength(el) + len;
-	    }, 2);
-	default:
-	    var len = 2;
-	    for(var k in obj) {
-		len += module.exports.encodedLength(k) +
-		    module.exports.encodedLength(obj[k]);
-	    }
-	    return len;
-	}
-    },
-    toBuffer: function(obj) {
-	var buf = new Buffer(module.exports.encodedLength(obj));
+    toBuffer: function(obj, len) {
+	len = len || 128;
+	var buf = new Buffer(len);
 	var offset = 0;
 
-	module.exports.write(obj,
-			     { write: function(s) {
-				 //console.log('s: '+offset+'+'+s.length+' buflen: '+buf.length);
-				 if (s.type === 'string')
-				     buf.write(s, offset, 'binary');
-				 else if (s.type === 'buffer') {
-				     s.copy(buf, offset, 0, s.length);
-				 }
-				 else
-				     throw 'Cannot write ' + s.type;
-				 offset += s.length;
-			     } });
-	return buf;
+	try {
+	    module.exports.write(obj,
+				 { write: function(s) {
+				     if (s.type === 'string')
+					 offset += buf.write(s, offset, 'binary');
+				     else if (s.type === 'buffer') {
+					 s.copy(buf, offset, 0, s.length);
+					 offset += s.length;
+				     }
+				     else
+					 throw 'Cannot write ' + s.type;
+				 } });
+	    return buf.slice(0, offset);
+	} catch (e) {
+	    if (e.message === 'Offset is out of bounds' ||
+		e.message === 'targetStart out of bounds')
+		// retry with larger buffer
+		return module.exports.toBuffer(obj, len * 2);
+	    else {
+		console.log(JSON.stringify(e));
+		throw e;
+	    }
+	}
     },
     encode: function(obj) {
 	var result = '';
