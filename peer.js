@@ -94,21 +94,22 @@ Peer.prototype = {
 	    dests = [{ addr: 'router.bittorrent.com',
 		       port: 6881
 		     }];
-	var nodeid = this.nodeid;
+	var self = this;
 	var now = Date.now();
 	dests.forEach(function(dest) {
 	    if (!dest.lastQuery ||
 		dest.lastQuery <= now - 300000) {
 		console.log(now + ': find_node ' +
 			    dest.addr + ':' + dest.port +
-			    ' (' + dest.lastQuery + ')');
+			    ' (' + (dest.nodeid ? NodeId.distance(self.nodeid, dest.nodeid) : '?') +
+			    '/' + dest.lastQuery + ')');
 		dest.lastQuery = now;
 		node.send(dest.addr, dest.port,
 			  { t: 'foo',
 			    y: 'q',
 			    q: 'find_node',
-			    a: { id: nodeid,
-				 target: nodeid
+			    a: { id: self.nodeid,
+				 target: self.nodeid
 			       }
 			  });
 	    }
