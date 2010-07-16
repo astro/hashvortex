@@ -26,15 +26,30 @@ function decodeNodes(buf) {
     return result;
 }
 
+function encodeNodes(nodes) {
+    var result = new Buffer(nodes.length * 26);
+    var i = 0;
+    nodes.forEach(function(node) {
+	m = node.addr.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+	node.nodeid.copy(result, i, 0, 20);
+	result[i + 20] = Number(m[1]);
+	result[i + 21] = Number(m[2]);
+	result[i + 22] = Number(m[3]);
+	result[i + 23] = Number(m[4]);
+	result[i + 24] = node.port >> 8;
+	result[i + 25] = node.port & 0xff;
+	i += 26;
+    });
+    return result;
+}
+
 var node = new KRPC.Node(10000);
 var queryCnt = 0, replyCnt = 0;
 var token = new Buffer('a');
 var targets = [new Buffer([87, 106, 131, 203, 0, 80]),
 	       new Buffer([87, 106, 131, 203, 0, 87])];
 node.on('query', function(addr, port, pkt, reply) {
-    console.log('Query from ' +
-		addr + ':' + port + ': ' +
-		pkt.q);
+    var t1 = Date.now();
     queryCnt++;
 
     switch(pkt.q.toString()) {
@@ -42,18 +57,26 @@ node.on('query', function(addr, port, pkt, reply) {
 	reply({ id: nodeid });
 	break;
     case 'find_node':
+	var nodes = pkt.a.target ? NodeDB.nearest(pkt.a.target) : [];
 	reply({ id: nodeid,
-		nodes: '' });
+		nodes: encodeNodes(nodes) });
 	break;
     case 'get_peers':
-	reply({ id: nodeid,
+	reply({ id: pkt.a.info_hash || nodeid,
 		token: token,
 		values: targets });
 	break;
     case 'announce_peer':
-	reply({ id: nodeid });
+	if (pkt.a.info_hash)
+	    reply({ id: pkt.a.info_hash });
 	break;
     }
+
+    var t2 = Date.now();
+    console.log('Query from ' +
+		addr + ':' + port + ': ' +
+		pkt.q + ' (' +
+		(t2 - t1) + ' ms)');
 });
 node.on('reply', function(addr, port, pkt) {
     /*console.log('Reply from ' + addr + ':' + port + ': ' +
