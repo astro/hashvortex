@@ -40,15 +40,19 @@ node.on('query', function(addr, port, pkt, reply) {
     switch(pkt.q.toString()) {
     case 'ping':
 	reply({ id: nodeid });
+	break;
     case 'find_node':
 	reply({ id: nodeid,
 		nodes: '' });
+	break;
     case 'get_peers':
 	reply({ id: nodeid,
 		token: token,
 		values: targets });
+	break;
     case 'announce_peer':
 	reply({ id: nodeid });
+	break;
     }
 });
 node.on('reply', function(addr, port, pkt) {
