@@ -121,8 +121,10 @@ module.exports = {
 				     if (s.type === 'string')
 					 offset += buf.write(s, offset, 'binary');
 				     else if (s.type === 'buffer') {
-					 s.copy(buf, offset, 0, s.length);
-					 offset += s.length;
+					 if (s.length > 0) {
+					     s.copy(buf, offset, 0, s.length);
+					     offset += s.length;
+					 }
 				     }
 				     else
 					 throw 'Cannot write ' + s.type;
