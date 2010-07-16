@@ -120,11 +120,9 @@ setInterval(function() {
 
 function Peer(nodeid) {
     this.nodeid = nodeid;
+    this.settleInterval = 300;
 
-    var self = this;
-    setInterval(function() {
-	self.settle();
-    }, 1000);
+    this.settle();
 }
 
 Peer.prototype = {
@@ -154,6 +152,12 @@ Peer.prototype = {
 			  });
 	    }
 	});
+
+	if (this.settleInterval < 60000)
+	    this.settleInterval = Math.round(this.settleInterval * 1.5);
+	setTimeout(function() {
+	    self.settle();
+	}, this.settleInterval);
     }
 };
 
