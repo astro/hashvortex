@@ -46,7 +46,7 @@ function encodeNodes(nodes) {
 var peers = [];
 function myNearestNodeId(nodeid) {
     var minDistance = 160;
-    var result = nodeid;
+    var result = null;
     peers.forEach(function(peer) {
 	var distance = NodeId.distance(nodeid, peer.nodeid);
 	if (distance < minDistance) {
@@ -72,6 +72,9 @@ node.on('query', function(addr, port, pkt, reply) {
 	    reply({ id: myNearestNodeId(pkt.a.nodeid) });
 	break;
     case 'find_node':
+	if (pkt.a.id && myNearestNodeId(pkt.a.id) == pkt.a.id)
+	    return;  // don't reply to self
+
 	if (pkt.a.target) {
 	    var nodes = NodeDB.nearest(pkt.a.target);
 	    reply({ id: myNearestNodeId(pkt.a.target),
