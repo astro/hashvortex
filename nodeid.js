@@ -32,6 +32,17 @@ module.exports = {
 	}
     },
 
+    toString: function(nodeid) {
+	var result = '';
+	for(var i = 0; i < nodeid.length; i++) {
+	    var c = nodeid[i].toString(16).toString();
+	    if (c.length > 1)
+		result += '0';
+	    result += c;
+	}
+	return result;
+    },
+
     distance: function(nodeidA, nodeidB) {
 	for(var i = 0; i < 20; i++) {
 	    //console.log(nodeidA[i] + ' <=> ' + nodeidB[i]);
