@@ -6,13 +6,14 @@ var BEnc = require('./benc');
 var Node = function(port) {
     EventEmitter.call(this);
     var self = this;
-    this.sock = dgram.createSocket(function(msg, rinfo) {
+    this.sock = dgram.createSocket('udp4');
+    this.sock.on('message', function(msg, rinfo) {
 	self.onMsg(msg, rinfo);
     });
-    this.sock.addListener("error", function(e) {
+    this.sock.on('error', function(e) {
 	throw e;
     });
-    this.sock.bind(port, '0.0.0.0');
+    this.sock.bind(port);
 }
 sys.inherits(Node, EventEmitter);
 
@@ -41,7 +42,7 @@ Node.prototype.onMsg = function(msg, rinfo) {
 
 Node.prototype.send = function(addr, port, pkt) {
     var buf = BEnc.toBuffer(pkt);
-    this.sock.send(port, addr, buf, 0, buf.length);
+    this.sock.send(buf, 0, buf.length, port, addr);
 };
 
 module.exports = {
