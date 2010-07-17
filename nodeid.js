@@ -36,7 +36,7 @@ module.exports = {
 	var result = '';
 	for(var i = 0; i < nodeid.length; i++) {
 	    var c = nodeid[i].toString(16).toString();
-	    if (c.length > 1)
+	    if (c.length < 2)
 		result += '0';
 	    result += c;
 	}
