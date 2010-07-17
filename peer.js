@@ -190,7 +190,9 @@ request.on('response', function (response) {
 	while((m = re.exec(body))) {
 	    var link = m[1];
 	    setTimeout(function() {
-		peers.push(new Peer(NodeId.parseMagnet(link)));
+		var nodeid = NodeId.parseMagnet(link);
+		console.log("new peer: " + NodeId.toString(nodeid));
+		peers.push(new Peer(nodeid));
 	    }, delay);
 	    delay += 2500;
 	}
