@@ -228,6 +228,15 @@ var spoofer = new NodeSpoofer(node);
 /*spoofer.addPeer(new Peer(NodeId.parseMagnet("magnet:?xt=urn:btih:8874e48d1b71415af0585a424d239f324b4342eb&dn=The+Twilight+Saga+Eclipse+TS+XViD+-+IMAGiNE&tr=http%3A%2F%2Fdenis.stalker.h3q.com%3A6969%2Fannounce&tr=http%3A%2F%2Ftracker.mytorrenttracker.com%3A6099%2Fannounce")));
 spoofer.addPeer(new Peer(NodeId.parseMagnet("magnet:?xt=urn:btih:0777769ef49ebfef7212c71a09b67eb68bcc602d&dn=Hot+Tub+Time+Machine+%282010%29+R5+XviD-MAX&tr=http%3A%2F%2Ftracker.prq.to%2Fannounce&tr=http%3A%2F%2Ftracker.mytorrenttracker.com%3A6099%2Fannounce")));*/
 
+var peerDelay = 0;
+function enqueuePeer(nodeid) {
+    setTimeout(function() {
+	console.log("new peer: " + NodeId.toString(nodeid));
+	spoofer.addPeer(new Peer(nodeid));
+    }, peerDelay);
+    peerDelay += 250;
+}
+
 var http = require('http');
 var tpb = http.createClient(80, 'thepiratebay.org');
 var request = tpb.request('GET', '/browse/201/0/9',
@@ -244,13 +253,8 @@ request.on('response', function (response) {
 	var m;
 	var delay = 0;
 	while((m = re.exec(body))) {
-	    var link = m[1];
-	    setTimeout(function() {
-		var nodeid = NodeId.parseMagnet(link);
-		console.log("new peer: " + NodeId.toString(nodeid));
-		peers.push(new Peer(nodeid));
-	    }, delay);
-	    delay += 2500;
+	    var nodeid = NodeId.parseMagnet(m[1]);
+	    enqueuePeer(nodeid);
 	}
     });
-});*/
+});
