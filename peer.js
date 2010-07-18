@@ -92,6 +92,16 @@ NodeSpoofer.prototype = {
 	return result;
     },
 
+    isMyNodeId: function(nodeid) {
+	for(var i in this.peers) {
+	    var peer = this.peers[i];
+	    if (peer.nodeid == peer)
+		return true;
+	    else if (peer.nodeid > peer)
+		return false;
+	}
+    },
+
     onQuery: function(addr, port, pkt, reply) {
 	var t1 = Date.now();
 	var q = pkt.q.toString();
@@ -104,7 +114,7 @@ NodeSpoofer.prototype = {
 		reply({ id: this.myNearestNodeId(pkt.a.id) || pkt.a.id });
 	    break;
 	case 'find_node':
-	    if (pkt.a.id && this.myNearestNodeId(pkt.a.id) == pkt.a.id)
+	    if (pkt.a.id && this.isMyNodeId(pkt.a.id))
 		return;  // don't reply to self
 
 	    if (pkt.a.target) {
@@ -143,7 +153,11 @@ NodeSpoofer.prototype = {
 	this.replyCnt++;
 
 	if (pkt.r.nodes) {
+	    var self = this;
 	    var dests = this.decodeNodes(pkt.r.nodes);
+	    dests = dests.filter(function(node) {
+		return !self.isMyNodeId(node.nodeid);
+	    });
 	    dests.forEach(NodeDB.seen);
 	}
 
