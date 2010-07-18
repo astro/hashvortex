@@ -32,9 +32,9 @@ NodeSpoofer.prototype = {
     addPeer: function(peer) {
 	this.peers.push(peer);
 	this.peers = this.peers.sort(function(peerA, peerB) {
-	    if (peerA < peerB)
+	    if (peerA.nodeid < peerB.nodeid)
 		return -1;
-	    else if (peerA > peerB)
+	    else if (peerA.nodeid > peerB.nodeid)
 		return 1;
 	    return 0;
 	});
@@ -79,6 +79,10 @@ NodeSpoofer.prototype = {
 	var minDistance = 160;
 	var result = null;
 	for(var i in this.peers) {
+	    if (i == 'type')
+		// Ouch, the Array.prototype.type hack
+		continue;
+
 	    var peer = this.peers[i];
 	    var distance = NodeId.distance(nodeid, peer.nodeid);
 	    if (distance < minDistance) {
@@ -180,6 +184,8 @@ NodeSpoofer.prototype = {
 };
 
 function Peer(nodeid) {
+    if (nodeid.length != 20)
+	throw 'Tried adding invalid NodeId';
     this.nodeid = nodeid;
     this.settleInterval = 300;
 
