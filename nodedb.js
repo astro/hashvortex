@@ -56,6 +56,7 @@ module.exports = {
 
 var purgeN = 160;
 function purge(n) {
+    var t1 = Date.now();
     var ary = db[purgeN];
     if (ary) {
 	var now = Date.now();
@@ -65,9 +66,11 @@ function purge(n) {
 					(node.lastReply && node.lastReply > now - 900000);
 				});
 	var after = db[purgeN].length;
+	var t2 = Date.now();
 	if (before != after)
 	    console.log("purged from bucket " + purgeN + ": " +
-			before + " - " + (before - after) + " = " + after);
+			before + " - " + (before - after) + " = " + after +
+			" (" + (t2 - t1) + " ms)");
     }
 }
 
