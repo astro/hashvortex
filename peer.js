@@ -9,127 +9,159 @@ process.on('uncaughtException',
 	       console.log(e.stack);
 	   });
 
-function decodeNodes(buf) {
-    var result = [];
-    for(var i = 0; i < buf.length; i += 26) {
-	var nodeid = buf.slice(i, i + 20);
-	var addr = buf[i + 20] + '.' +
-	    buf[i + 21] + '.' +
-	    buf[i + 22] + '.' +
-	    buf[i + 23];
-	var port = (buf[i + 24] << 8) | buf[i + 25];
-	result.push({ addr: addr,
-		      port: port,
-		      nodeid: nodeid
-		    });
-    }
-    return result;
+function memberFun(obj, fun) {
+    return function() {
+	fun.apply(obj, arguments);
+    };
 }
 
-function encodeNodes(nodes) {
-    var result = new Buffer(nodes.length * 26);
-    var i = 0;
-    nodes.forEach(function(node) {
-	m = node.addr.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
-	node.nodeid.copy(result, i, 0, 20);
-	result[i + 20] = Number(m[1]);
-	result[i + 21] = Number(m[2]);
-	result[i + 22] = Number(m[3]);
-	result[i + 23] = Number(m[4]);
-	result[i + 24] = node.port >> 8;
-	result[i + 25] = node.port & 0xff;
-	i += 26;
-    });
-    return result;
+function NodeSpoofer(node) {
+    this.node = node;
+    this.peers = [];
+    this.queryStats = {};
+    this.replyCnt = 0;
+    this.token = new Buffer('a');
+    this.targets = [new Buffer([87, 106, 131, 203, 0, 80]),
+		    new Buffer([87, 106, 131, 203, 0, 85])];
+
+    node.on('query', memberFun(this, this.onQuery));
+    node.on('reply', memberFun(this, this.onReply));
+    setInterval(memberFun(this, this.dumpStats), 1000);
 }
+NodeSpoofer.prototype = {
+    addPeer: function(peer) {
+	this.peers.push(peer);
+	this.peers = this.peers.sort(function(peerA, peerB) {
+	    if (peerA < peerB)
+		return -1;
+	    else if (peerA > peerB)
+		return 1;
+	    return 0;
+	});
+	return peer;
+    },
 
-var peers = [];
-function myNearestNodeId(nodeid) {
-    var minDistance = 160;
-    var result = null;
-    peers.forEach(function(peer) {
-	var distance = NodeId.distance(nodeid, peer.nodeid);
-	if (distance < minDistance) {
-	    minDistance = distance;
-	    result = peer.nodeid;
+    decodeNodes: function(buf) {
+	var result = [];
+	for(var i = 0; i < buf.length; i += 26) {
+	    var nodeid = buf.slice(i, i + 20);
+	    var addr = buf[i + 20] + '.' +
+		buf[i + 21] + '.' +
+		buf[i + 22] + '.' +
+		buf[i + 23];
+	    var port = (buf[i + 24] << 8) | buf[i + 25];
+	    result.push({ addr: addr,
+			  port: port,
+			  nodeid: nodeid
+			});
 	}
-    });
-    return result;
-}
+	return result;
+    },
 
-var node = new KRPC.Node(10000);
-var queryStats = {}, replyCnt = 0;
-var token = new Buffer('a');
-var targets = [new Buffer([87, 106, 131, 203, 0, 80]),
-	       new Buffer([87, 106, 131, 203, 0, 87])];
-node.on('query', function(addr, port, pkt, reply) {
-    var t1 = Date.now();
-    var q = pkt.q.toString();
-    queryStats[q] = queryStats[q] || 0;
-    queryStats[q]++;
+    encodeNodes: function(nodes) {
+	var result = new Buffer(nodes.length * 26);
+	var i = 0;
+	nodes.forEach(function(node) {
+	    m = node.addr.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+	    node.nodeid.copy(result, i, 0, 20);
+	    result[i + 20] = Number(m[1]);
+	    result[i + 21] = Number(m[2]);
+	    result[i + 22] = Number(m[3]);
+	    result[i + 23] = Number(m[4]);
+	    result[i + 24] = node.port >> 8;
+	    result[i + 25] = node.port & 0xff;
+	    i += 26;
+	});
+	return result;
+    },
 
-    switch(q) {
-    case 'ping':
-	if (pkt.a.id)
-	    reply({ id: myNearestNodeId(pkt.a.nodeid) || pkt.a.id });
-	break;
-    case 'find_node':
-	if (pkt.a.id && myNearestNodeId(pkt.a.id) == pkt.a.id)
-	    return;  // don't reply to self
-
-	if (pkt.a.target) {
-	    console.log('find_node ' + NodeId.toString(pkt.a.target));
-	    var nodes = NodeDB.nearest(pkt.a.target, 8);
-	    reply({ id: myNearestNodeId(pkt.a.target) || pkt.a.target,
-		    nodes: encodeNodes(nodes) });
+    myNearestNodeId: function(nodeid) {
+	var minDistance = 160;
+	var result = null;
+	for(var i in this.peers) {
+	    var peer = this.peers[i];
+	    var distance = NodeId.distance(nodeid, peer.nodeid);
+	    if (distance < minDistance) {
+		minDistance = distance;
+		result = peer.nodeid;
+	    } else if (distance > minDistance)
+		/* peers are sorted, so when distance increases again
+		 * we already have the nearest. */
+		break;
 	}
-	break;
-    case 'get_peers':
-	console.log('get_peers ' + NodeId.toString(pkt.a.info_hash));
-	reply({ id: myNearestNodeId(pkt.a.info_hash) || pkt.a.info_hash,
-		token: token,
-		values: targets });
-	break;
-    case 'announce_peer':
-	if (pkt.a.info_hash) {
-	    console.log('announce_peer ' + NodeId.toString(pkt.a.info_hash));
-	    reply({ id: myNearestNodeId(pkt.a.info_hash) || pkt.a.info_hash });
+	return result;
+    },
+
+    onQuery: function(addr, port, pkt, reply) {
+	var t1 = Date.now();
+	var q = pkt.q.toString();
+	this.queryStats[q] = this.queryStats[q] || 0;
+	this.queryStats[q]++;
+
+	switch(q) {
+	case 'ping':
+	    if (pkt.a.id)
+		reply({ id: this.myNearestNodeId(pkt.a.nodeid) || pkt.a.id });
+	    break;
+	case 'find_node':
+	    if (pkt.a.id && this.myNearestNodeId(pkt.a.id) == pkt.a.id)
+		return;  // don't reply to self
+
+	    if (pkt.a.target) {
+		console.log('find_node ' + NodeId.toString(pkt.a.target));
+		var nodes = NodeDB.nearest(pkt.a.target, 8);
+		reply({ id: this.myNearestNodeId(pkt.a.target) || pkt.a.target,
+			nodes: this.encodeNodes(nodes) });
+	    }
+	    break;
+	case 'get_peers':
+	    console.log('get_peers ' + NodeId.toString(pkt.a.info_hash));
+	    reply({ id: this.myNearestNodeId(pkt.a.info_hash) || pkt.a.info_hash,
+		    token: this.token,
+		    values: this.targets });
+	    break;
+	case 'announce_peer':
+	    if (pkt.a.info_hash) {
+		console.log('announce_peer ' + NodeId.toString(pkt.a.info_hash));
+		reply({ id: this.myNearestNodeId(pkt.a.info_hash) || pkt.a.info_hash });
+	    }
+	    break;
 	}
-	break;
+
+	var t2 = Date.now();
+	console.log('Query from ' +
+		    addr + ':' + port + ': ' +
+		    pkt.q + ' (' +
+		    (t2 - t1) + ' ms)');
+    },
+
+    onReply: function(addr, port, pkt) {
+	/*console.log('Reply from ' + addr + ':' + port + ': ' +
+	  JSON.stringify(pkt));*/
+	this.replyCnt++;
+
+	if (pkt.r.nodes) {
+	    var dests = this.decodeNodes(pkt.r.nodes);
+	    dests.forEach(NodeDB.seen);
+	}
+
+	var node = NodeDB.findNode({ addr: addr,
+				     port: port,
+				     nodeid: pkt.r.id
+				   });
+	if (node)
+	    node.lastReply = Date.now();
+    },
+
+    dumpStats: function() {
+	now = Date.now();
+	console.log((this.lastStats ? 'in ' + (now - this.lastStats) + ' ms' : 'start') + ': ' +
+		    JSON.stringify(this.queryStats) + '; ' + this.replyCnt + ' replies');
+	this.queryStats = {};
+	this.replyCnt = 0;
+	this.lastStats = now;
     }
-
-    var t2 = Date.now();
-    console.log('Query from ' +
-		addr + ':' + port + ': ' +
-		pkt.q + ' (' +
-		(t2 - t1) + ' ms)');
-});
-node.on('reply', function(addr, port, pkt) {
-    /*console.log('Reply from ' + addr + ':' + port + ': ' +
-		JSON.stringify(pkt));*/
-    replyCnt++;
-
-    if (pkt.r.nodes) {
-	var dests = decodeNodes(pkt.r.nodes);
-	dests.forEach(NodeDB.seen);
-    }
-
-    var node = NodeDB.findNode({ addr: addr,
-				 port: port,
-				 nodeid: pkt.r.id
-			       });
-    if (node)
-	node.lastReply = Date.now();
-});
-var lastStats;
-setInterval(function() {
-    now = Date.now();
-    console.log((lastStats ? 'in ' + (now - lastStats) + ' ms' : 'start') + ': ' +
-		JSON.stringify(queryStats) + '; ' + replyCnt + ' replies');
-    queryStats = {};
-    replyCnt = 0;
-    lastStats = now;
-}, 1000);
+};
 
 function Peer(nodeid) {
     this.nodeid = nodeid;
@@ -140,7 +172,7 @@ function Peer(nodeid) {
 
 Peer.prototype = {
     settle: function() {
-	var dests = NodeDB.nearest(this.nodeid, 4);
+	var dests = NodeDB.nearest(this.nodeid, 16);
 	if (dests.length < 1)
 	    dests = [{ addr: 'router.bittorrent.com',
 		       port: 6881
@@ -175,12 +207,14 @@ Peer.prototype = {
 };
 
 
-/*peers.push(new Peer(NodeId.parseMagnet("magnet:?xt=urn:btih:8874e48d1b71415af0585a424d239f324b4342eb&dn=The+Twilight+Saga+Eclipse+TS+XViD+-+IMAGiNE&tr=http%3A%2F%2Fdenis.stalker.h3q.com%3A6969%2Fannounce&tr=http%3A%2F%2Ftracker.mytorrenttracker.com%3A6099%2Fannounce"), node));
-peers.push(new Peer(NodeId.parseMagnet("magnet:?xt=urn:btih:0777769ef49ebfef7212c71a09b67eb68bcc602d&dn=Hot+Tub+Time+Machine+%282010%29+R5+XviD-MAX&tr=http%3A%2F%2Ftracker.prq.to%2Fannounce&tr=http%3A%2F%2Ftracker.mytorrenttracker.com%3A6099%2Fannounce"), node));*/
+var node = new KRPC.Node(10000);
+var spoofer = new NodeSpoofer(node);
+/*spoofer.addPeer(new Peer(NodeId.parseMagnet("magnet:?xt=urn:btih:8874e48d1b71415af0585a424d239f324b4342eb&dn=The+Twilight+Saga+Eclipse+TS+XViD+-+IMAGiNE&tr=http%3A%2F%2Fdenis.stalker.h3q.com%3A6969%2Fannounce&tr=http%3A%2F%2Ftracker.mytorrenttracker.com%3A6099%2Fannounce")));
+spoofer.addPeer(new Peer(NodeId.parseMagnet("magnet:?xt=urn:btih:0777769ef49ebfef7212c71a09b67eb68bcc602d&dn=Hot+Tub+Time+Machine+%282010%29+R5+XviD-MAX&tr=http%3A%2F%2Ftracker.prq.to%2Fannounce&tr=http%3A%2F%2Ftracker.mytorrenttracker.com%3A6099%2Fannounce")));*/
 
 var http = require('http');
 var tpb = http.createClient(80, 'thepiratebay.org');
-var request = tpb.request('GET', '/top/all',
+var request = tpb.request('GET', '/browse/201/0/9',
 			  {'host': 'thepiratebay.org'});
 request.end();
 var body = '';
@@ -203,4 +237,4 @@ request.on('response', function (response) {
 	    delay += 2500;
 	}
     });
-});
+});*/
