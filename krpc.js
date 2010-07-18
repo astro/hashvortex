@@ -26,7 +26,7 @@ Node.prototype.onMsg = function(msg, rinfo) {
 	    var self = this;
 	    function replySender(reply) {
 		var rpkt = { t: pkt.t,
-			     q: 'r',
+			     y: 'r',
 			     r: reply };
 		self.send(rinfo.address, rinfo.port, rpkt);
 	    }
