@@ -115,10 +115,12 @@ NodeSpoofer.prototype = {
 	    }
 	    break;
 	case 'get_peers':
-	    console.log('get_peers ' + NodeId.toString(pkt.a.info_hash));
-	    reply({ id: this.myNearestNodeId(pkt.a.info_hash) || pkt.a.info_hash,
-		    token: this.token,
-		    values: this.targets });
+	    if (pkt.a.info_hash) {
+		console.log('get_peers ' + NodeId.toString(pkt.a.info_hash));
+		reply({ id: this.myNearestNodeId(pkt.a.info_hash) || pkt.a.info_hash,
+			token: this.token,
+			values: this.targets });
+	    }
 	    break;
 	case 'announce_peer':
 	    if (pkt.a.info_hash) {
