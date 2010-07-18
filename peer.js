@@ -101,7 +101,7 @@ NodeSpoofer.prototype = {
 	switch(q) {
 	case 'ping':
 	    if (pkt.a.id)
-		reply({ id: this.myNearestNodeId(pkt.a.nodeid) || pkt.a.id });
+		reply({ id: this.myNearestNodeId(pkt.a.id) || pkt.a.id });
 	    break;
 	case 'find_node':
 	    if (pkt.a.id && this.myNearestNodeId(pkt.a.id) == pkt.a.id)
