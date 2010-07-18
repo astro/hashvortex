@@ -19,6 +19,7 @@ function NodeSpoofer(node) {
     this.node = node;
     this.peers = [];
     this.queryStats = {};
+    this.queryTime = 0;
     this.replyCnt = 0;
     this.token = new Buffer('a');
     this.targets = [new Buffer([87, 106, 131, 203, 0, 80]),
@@ -149,6 +150,7 @@ NodeSpoofer.prototype = {
 		    addr + ':' + port + ': ' +
 		    pkt.q + ' (' +
 		    (t2 - t1) + ' ms)');
+	this.queryTime += t2 - t1;
     },
 
     onReply: function(addr, port, pkt) {
@@ -176,8 +178,9 @@ NodeSpoofer.prototype = {
     dumpStats: function() {
 	now = Date.now();
 	console.log((this.lastStats ? 'in ' + (now - this.lastStats) + ' ms' : 'start') + ': ' +
-		    JSON.stringify(this.queryStats) + '; ' + this.replyCnt + ' replies');
+		    JSON.stringify(this.queryStats) + ' in ' + this.queryTime + ' ms; ' + this.replyCnt + ' replies');
 	this.queryStats = {};
+	this.queryTime = 0;
 	this.replyCnt = 0;
 	this.lastStats = now;
     }
