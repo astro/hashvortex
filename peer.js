@@ -244,23 +244,31 @@ function enqueuePeer(nodeid) {
 }
 
 var http = require('http');
-var tpb = http.createClient(80, 'thepiratebay.org');
-var request = tpb.request('GET', '/browse/201/0/9',
-			  {'host': 'thepiratebay.org'});
-request.end();
-var body = '';
-request.on('response', function (response) {
-    response.setEncoding('utf8');
-    response.on('data', function (chunk) {
-	body += chunk;
+var url = require('url');
+function addFromMagnetLinks(addr) {
+    uri = url.parse(addr);
+    var tpb = http.createClient(uri.port || 80, uri.host);
+    var request = tpb.request('GET', uri.pathname,
+			      {'Host': uri.host});
+    request.end();
+    var body = '';
+    request.on('response', function (response) {
+	response.setEncoding('utf8');
+	response.on('data', function (chunk) {
+	    body += chunk;
+	});
+	response.on('end', function() {
+	    var re = /(magnet:.+?\&)/g;
+	    var m;
+	    var delay = 0;
+	    while((m = re.exec(body))) {
+		var nodeid = NodeId.parseMagnet(m[1]);
+		enqueuePeer(nodeid);
+	    }
+	});
     });
-    response.on('end', function() {
-	var re = /(magnet:.+?\&)/g;
-	var m;
-	var delay = 0;
-	while((m = re.exec(body))) {
-	    var nodeid = NodeId.parseMagnet(m[1]);
-	    enqueuePeer(nodeid);
-	}
-    });
+}
+
+process.argv.forEach(function(link) {
+    addFromMagnetLinks(link);
 });
