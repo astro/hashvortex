@@ -66,7 +66,8 @@ function purge(n) {
 				});
 	var after = db[purgeN].length;
 	if (before != after)
-	    console.log("purged " + (before - after) + " from bucket " + purgeN);
+	    console.log("purged from bucket " + purgeN + ": " +
+			before + " - " + (before - after) + " = " + after);
     }
 }
 
