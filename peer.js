@@ -22,8 +22,7 @@ function NodeSpoofer(node) {
     this.queryTime = 0;
     this.replyCnt = 0;
     this.token = new Buffer('a');
-    this.targets = [new Buffer([87, 106, 131, 203, 0, 80]),
-		    new Buffer([87, 106, 131, 203, 0, 85])];
+    this.targets = [new Buffer([87, 106, 131, 203, 0, 85])];
 
     node.on('query', memberFun(this, this.onQuery));
     node.on('reply', memberFun(this, this.onReply));
