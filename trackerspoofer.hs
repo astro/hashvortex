@@ -10,7 +10,6 @@ import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Sequence (Seq, ViewL((:<), EmptyL))
 import qualified Data.Sequence as Seq
-import Data.Time.Clock.POSIX (getPOSIXTime, POSIXTime)
 import Data.IORef
 import qualified Network.Libev as Ev
 import qualified Data.ByteString.Lazy.Char8 as B8
@@ -25,10 +24,11 @@ import EventLog
 import qualified MagnetGrep
 
 type MyNode = ()
+type Time = Ev.EvTimestamp
 data Peer = Peer { peerAddr :: SockAddr,
-                   peerLastSeen :: POSIXTime,
-                   peerLastResponse :: Maybe POSIXTime,
-                   peerLastQuery :: Maybe POSIXTime
+                   peerLastSeen :: Time,
+                   peerLastResponse :: Maybe Time,
+                   peerLastQuery :: Maybe Time
                  }
 
 data AppState = AppState { stMyNodes :: Map NodeId MyNode,
@@ -64,7 +64,7 @@ setTimer delay repeat handler
          liftIO $ do evTimer <- Ev.mkEvTimer
                      evCbRef <- newIORef nullFunPtr
                      evCb <- Ev.mkTimerCallback $ \evLoop evTimer evType ->
-                             do when (repeat < 1) $
+                             do when (repeat <= 0) $
                                      do -- stop first?
                                        Ev.freeEvTimer evTimer
                                        evCb <- readIORef evCbRef
@@ -130,7 +130,7 @@ alterPeer nodeId alterFun
 
 seenPeer :: NodeId -> SockAddr -> App ()
 seenPeer nodeId addr
-    = do now <- liftIO getPOSIXTime
+    = do now <- now
          let f Nothing = Just $
                          Peer { peerAddr = addr,
                                 peerLastSeen = now,
@@ -145,7 +145,7 @@ seenPeer nodeId addr
 
 updatePeerResponse :: NodeId -> App ()
 updatePeerResponse nodeId
-    = do now <- liftIO $ getPOSIXTime
+    = do now <- now
          let f Nothing = Nothing
              f (Just peer) = Just $
                              peer { peerLastResponse = Just now
@@ -153,7 +153,7 @@ updatePeerResponse nodeId
          alterPeer nodeId f
 
 peerQueried nodeId
-    = do now <- liftIO $ getPOSIXTime
+    = do now <- now
          let f Nothing = Nothing
              f (Just peer) = Just $
                              peer { peerLastQuery = Just now
@@ -229,7 +229,7 @@ onReply addr reply
 settleTo :: NodeId -> App Int
 settleTo target
     = do peers <- take 8 <$> nearestPeers target
-         now <- liftIO getPOSIXTime
+         now <- now
          let peerFilter (_, peer) =
                  case peerLastQuery peer of
                    Nothing -> True
@@ -258,9 +258,9 @@ settleTo target
 
 settle :: NodeId -> App ()
 settle nodeId =
-    do t1 <- liftIO $ getPOSIXTime
+    do t1 <- now
        sent <- settleTo nodeId
-       t2 <- liftIO $ getPOSIXTime
+       t2 <- now
        when (sent > 0) $
             liftIO $ putStrLn $
                        "Sent " ++ show sent ++
@@ -286,7 +286,7 @@ popSettleQueue
 -- Compaction
 
 purge :: App ()
-purge = do now <- liftIO $ getPOSIXTime
+purge = do now <- now
            app <- getState
            let peers = stPeers app
                keep peer
@@ -301,9 +301,9 @@ purge = do now <- liftIO $ getPOSIXTime
            peers' `seq`
                   putState $ app { stPeers = peers' }
 
-purger = do t1 <- liftIO $ getPOSIXTime
+purger = do t1 <- now
             purge
-            t2 <- liftIO $ getPOSIXTime
+            t2 <- now
             liftIO $ putStrLn $ "Purged peers in " ++ show (t2 - t1)
 
 -- Stats
