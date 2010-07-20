@@ -224,14 +224,14 @@ onReply addr reply
 
 settleTo :: NodeId -> App Int
 settleTo target
-    = do peers <- take 2 <$> nearestPeers target
+    = do peers <- take 8 <$> nearestPeers target
          now <- liftIO getPOSIXTime
          let peerFilter (_, peer) =
                  case peerLastQuery peer of
                    Nothing -> True
                    Just lastQuery ->
                        lastQuery < now - 10
-             peers' = filter peerFilter peers
+             peers' = take 2 $ filter peerFilter peers
              q = FindNode target target
          node <- ctxNode <$> ask >>=
                  liftIO . readIORef
