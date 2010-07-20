@@ -348,4 +348,8 @@ runSpoofer port myNodeIds
 main = do args <- getArgs
           myNodeIds <- concat <$>
                        forM args MagnetGrep.grep 
-          runSpoofer 10000 myNodeIds
+          case length myNodeIds of
+            0 ->
+                putStrLn "Cannot start without any magnet links"
+            _ ->
+                runSpoofer 10000 myNodeIds
