@@ -55,12 +55,13 @@ nodeIdPlus :: NodeId -> Integer -> NodeId
 nodeIdPlus (NodeId buf) off = NodeId $ integerToBuf $ bufToInteger buf + off
 
 
-hexToNodeId :: String -> NodeId
+hexToNodeId :: String -> Maybe NodeId
 hexToNodeId s
-    | length s == 40 = NodeId $
+    | length s == 40 = Just $ NodeId $
                        W8.pack $
                        map hexToByte $
                        chunkify 2 s
+    | otherwise = Nothing
     where hexToByte s' = let [(i, "")] = readHex s'
                          in i
           chunkify size s'

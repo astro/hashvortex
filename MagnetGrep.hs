@@ -29,7 +29,11 @@ grepInfoHashes s
     = case stripPrefix "magnet:?xt=urn:btih:" s of
         Just s' ->
             let (infoHash, s'') = break (== '&') s'
-            in hexToNodeId infoHash : grepInfoHashes s''
+            in case hexToNodeId infoHash of
+                 Just nodeId ->
+                     nodeId : grepInfoHashes s''
+                 Nothing ->
+                     grepInfoHashes s''
         Nothing ->
             grepInfoHashes $ tail s
 

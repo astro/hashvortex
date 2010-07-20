@@ -9,6 +9,7 @@ import Network.Socket (SockAddr(SockAddrInet))
 import Data.Maybe (fromMaybe)
 import Control.Monad
 import Control.DeepSeq
+import Control.Applicative
 
 import BEncoding
 import NodeId
@@ -74,7 +75,8 @@ decodePacket buf
                      do BString q <- pkt `bdictLookup` "q"
                         let q' = B8.unpack q
                         a@(BDict _) <- pkt `bdictLookup` "a"
-                        return $ Right $ QPacket (T t) $ decodeQuery q' a
+                        query <- decodeQuery q' a
+                        return $ Right $ QPacket (T t) query
                  "r" ->
                      do r@(BDict _) <- pkt `bdictLookup` "r"
                         return $ Right $ RPacket (T t) r
@@ -86,19 +88,25 @@ decodePacket buf
         Left e -> Left $ "decode: " ++ e
 
 decodeQuery q a
-    = let getId k = let Just (BString s) = a `bdictLookup` k
-                    in makeNodeId s
-          aId = getId "id"
-          aTarget = getId "target"
-          aInfoHash = getId "info_hash"
-          Just (BInteger aPort) = a `bdictLookup` "port"
-          Just (BString aToken) = a `bdictLookup` "token"
+    = let getId k = do BString s <- a `bdictLookup` k
+                       -- TODO: check s len
+                       return $ makeNodeId s
       in case q of
-           "ping" -> Ping aId
-           "find_node" -> FindNode aId aTarget
-           "get_peers" -> GetPeers aId aInfoHash
-           "announce_peer" -> AnnouncePeer aId aInfoHash aPort aToken
-           _ -> OtherQuery q a
+           "ping" -> Ping <$>
+                     getId "id"
+           "find_node" -> FindNode <$>
+                          getId "id" <*>
+                                getId "target"
+           "get_peers" -> GetPeers <$>
+                          getId "id" <*>
+                          getId "info_hash"
+           "announce_peer" -> AnnouncePeer <$>
+                              getId "id" <*>
+                              getId "info_hash" <*>
+                             (do BInteger port <- a `bdictLookup` "port"
+                                 return port) <*>
+                             (do BString token <- a `bdictLookup` "token"
+                                 return token)
 
 encodePacket :: Packet -> B8.ByteString
 encodePacket (QPacket (T t) qry)
