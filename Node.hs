@@ -111,9 +111,9 @@ sendQueryNoWait addr qry
          return st { stLastT = t }
 
 getAddrs :: String -> String -> IO [SockAddr]
-getAddrs name serv = liftM (map addrAddress .
-                            filter ((== AF_INET) . addrFamily)) $
-                     getAddrInfo (Just defaultHints { addrFamily = AF_INET })
-                     (Just name) (Just serv)
-                
-
+getAddrs name serv
+    = do putStrLn $ "Resolving " ++ show (name, serv)
+         liftM (map addrAddress .
+                    filter ((== AF_INET) . addrFamily)) $
+           getAddrInfo (Just defaultHints { addrFamily = AF_INET })
+           (Just name) (Just serv)
