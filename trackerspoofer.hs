@@ -184,9 +184,6 @@ onQuery' (GetPeers nodeId infoHash)
                         BString token),
                        (BString $ B8.pack "values",
                         targets)]
-    where peerlist = map (BString . encodeAddr) peers
-          peers = concat $ do port <- [85, 87]
-                              return [SockAddrInet port 3414387287]
 onQuery' (AnnouncePeer nodeId infoHash port token)
     = do (myNodeId, _) <- nearestMyNode infoHash
          return $ Right $
@@ -230,7 +227,7 @@ settleTo target
                  case peerLastQuery peer of
                    Nothing -> True
                    Just lastQuery ->
-                       lastQuery < now - 10
+                       lastQuery < now - 90
              peers' = take 2 $ filter peerFilter peers
              q = FindNode target target
          node <- ctxNode <$> ask >>=
@@ -280,7 +277,7 @@ purge = do now <- liftIO $ getPOSIXTime
                keep peer
                    = (peerLastSeen peer > now - 300) ||
                      (case peerLastResponse peer of
-                        Just lastResponse -> lastResponse > now - 900
+                        Just lastResponse -> lastResponse > now - 600
                         Nothing -> False) ||
                      (case peerLastQuery peer of
                         Just lastQuery -> lastQuery > now - 90
