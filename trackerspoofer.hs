@@ -8,6 +8,8 @@ import Control.Monad.Reader
 import Control.Applicative
 import Data.Map (Map)
 import qualified Data.Map as Map
+import Data.Sequence (Seq, ViewL((:<), EmptyL))
+import qualified Data.Sequence as Seq
 import Data.Time.Clock.POSIX (getPOSIXTime, POSIXTime)
 import Data.IORef
 import qualified Network.Libev as Ev
@@ -30,7 +32,8 @@ data Peer = Peer { peerAddr :: SockAddr,
                  }
 
 data AppState = AppState { stMyNodes :: Map NodeId MyNode,
-                           stPeers :: Map NodeId Peer
+                           stPeers :: Map NodeId Peer,
+                           stSettleQueue :: Seq NodeId
                          }
 
 data AppContext = AppContext { ctxState :: IORef AppState,
@@ -48,6 +51,10 @@ getState = ctxState <$> ask >>=
 putState :: AppState -> App ()
 putState app = do appRef <- ctxState <$> ask
                   liftIO $ writeIORef appRef app
+
+now :: App Ev.EvTimestamp
+now = ctxEvLoop <$> ask >>=
+      (liftIO . Ev.evNow)
 
 setTimer :: Ev.EvTimestamp -> Ev.EvTimestamp -> App () -> App ()
 setTimer delay repeat handler
@@ -260,13 +267,21 @@ settle nodeId =
                        " requests for " ++ show nodeId ++
                        " in " ++ show (t2 - t1)
 
-settler :: [NodeId] -> App ()
-settler []
+settler :: App ()
+settler
+    = popSettleQueue >>= settle
+
+popSettleQueue :: App NodeId
+popSettleQueue
     = do app <- getState
-         settler $ Map.keys $ stMyNodes app
-settler (nodeId:nodeIds)
-    = do settle nodeId
-         setTimeout 0.1 $ settler nodeIds
+         case Seq.viewl $ stSettleQueue app of
+           nodeId :< settleQueue ->
+               do putState $ app { stSettleQueue = settleQueue }
+                  return nodeId
+           _ ->
+               do let nodeId : nodeIds = Map.keys $ stMyNodes app
+                  putState $ app { stSettleQueue = Seq.fromList nodeIds }
+                  return nodeId
 
 -- Compaction
 
@@ -291,8 +306,6 @@ purger = do t1 <- liftIO $ getPOSIXTime
             t2 <- liftIO $ getPOSIXTime
             liftIO $ putStrLn $ "Purged peers in " ++ show (t2 - t1)
 
-            setTimeout 10 purger
-
 -- Stats
 
 stats :: App ()
@@ -300,8 +313,6 @@ stats = do app <- getState
            liftIO $ putStrLn $
                   "MyNodes: " ++ show (Map.size $ stMyNodes app) ++
                   "\tPeers: " ++ show (Map.size $ stPeers app)
-
-statsLoop = setInterval 1 stats
 
 -- Main
 
@@ -312,13 +323,14 @@ makeTargets hostsPorts = BList <$> map (BString . encodeAddr) <$>
 
 runSpoofer port myNodeIds
     = do log <- newLog 1.0 "spoofer.data"
-         evFlags <- Ev.evRecommendedBackends
-         evLoop <- Ev.evDefaultLoop Ev.evflag_auto
+         evLoop <- Ev.evRecommendedBackends >>=
+                   Ev.evDefaultLoop
          node <- Node.new evLoop 10000
 
          let app = AppState { stMyNodes = Map.fromList $
                                           map (, ()) myNodeIds,
-                              stPeers = Map.empty
+                              stPeers = Map.empty,
+                              stSettleQueue = Seq.empty
                             }
          appRef <- newIORef app
          nodeRef <- newIORef node
@@ -336,9 +348,10 @@ runSpoofer port myNodeIds
          Node.setQueryHandler (appCallback onQuery) node
          Node.setReplyHandler (appCallback onReply) node
 
-         appCall $ settler []
-         appCall purger
-         appCall statsLoop
+         appCall $ do
+           setInterval 0.1 $ settler
+           setInterval 10 $ purger
+           setInterval 1 $ stats
 
          Ev.evLoop evLoop 0
 
