@@ -4,6 +4,7 @@ import qualified Network.HTTP as HTTP
 import Network.URI (parseURI)
 import Data.Maybe (fromMaybe)
 import Data.List (stripPrefix)
+import NodeId
 
 
 grep url
@@ -19,14 +20,14 @@ grep url
          Right rsp <- HTTP.simpleHTTP req'
          return $ grepInfoHashes $ HTTP.rspBody rsp
 
-grepInfoHashes :: String -> [String]
+grepInfoHashes :: String -> [NodeId]
 grepInfoHashes ""
     = []
 grepInfoHashes s
     = case stripPrefix "magnet:?xt=urn:btih:" s of
         Just s' ->
             let (infoHash, s'') = break (== '&') s'
-            in infoHash : grepInfoHashes s''
+            in hexToNodeId infoHash : grepInfoHashes s''
         Nothing ->
             grepInfoHashes $ tail s
 

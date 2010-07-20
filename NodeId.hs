@@ -3,10 +3,11 @@ module NodeId where
 import Control.Monad
 import qualified Data.ByteString as W8
 import qualified Data.ByteString.Lazy as LW8
-import Numeric (showHex)
+import Numeric (showHex, readHex)
 import Data.Bits
 import System.Random
 import Control.DeepSeq
+import Debug.Trace
 
 import IntBuf
 
@@ -53,3 +54,16 @@ distanceOrder a b = let r 0 = 0
 nodeIdPlus :: NodeId -> Integer -> NodeId
 nodeIdPlus (NodeId buf) off = NodeId $ integerToBuf $ bufToInteger buf + off
 
+
+hexToNodeId :: String -> NodeId
+hexToNodeId s
+    | length s == 40 = NodeId $
+                       W8.pack $
+                       map hexToByte $
+                       chunkify 2 s
+    where hexToByte s = let [(i, "")] = readHex s
+                        in i
+          chunkify size s
+              | length s < size = []
+              | otherwise = let (x, xs) = splitAt size s
+                            in x : chunkify size xs
