@@ -10,6 +10,7 @@ import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Sequence (Seq, ViewL((:<), EmptyL))
 import qualified Data.Sequence as Seq
+import Data.Time.Clock.POSIX (getPOSIXTime)
 import Data.IORef
 import qualified Network.Libev as Ev
 import qualified Data.ByteString.Lazy.Char8 as B8
@@ -258,9 +259,9 @@ settleTo target
 
 settle :: NodeId -> App ()
 settle nodeId =
-    do t1 <- now
+    do t1 <- liftIO $ getPOSIXTime
        sent <- settleTo nodeId
-       t2 <- now
+       t2 <- liftIO $ getPOSIXTime
        when (sent > 0) $
             liftIO $ putStrLn $
                        "Sent " ++ show sent ++
@@ -301,9 +302,9 @@ purge = do now <- now
            peers' `seq`
                   putState $ app { stPeers = peers' }
 
-purger = do t1 <- now
+purger = do t1 <- liftIO $ getPOSIXTime
             purge
-            t2 <- now
+            t2 <- liftIO $ getPOSIXTime
             liftIO $ putStrLn $ "Purged peers in " ++ show (t2 - t1)
 
 -- Stats
