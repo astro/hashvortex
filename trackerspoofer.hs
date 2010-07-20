@@ -35,7 +35,8 @@ data AppState = AppState { stMyNodes :: Map NodeId MyNode,
 
 data AppContext = AppContext { ctxState :: IORef AppState,
                                ctxNode :: IORef Node.Node,
-                               ctxEvLoop :: Ev.EvLoopPtr
+                               ctxEvLoop :: Ev.EvLoopPtr,
+                               ctxLogger :: Logger
                              }
 type App a = ReaderT AppContext IO a
 
@@ -155,12 +156,12 @@ peerQueried nodeId
 
 token = B8.pack "a"
 
-onQuery addr (Ping nodeId)
+onQuery' (Ping nodeId)
     = do (myNodeId, _) <- nearestMyNode nodeId
          return $ Right $
                 BDict [(BString $ B8.pack "id",
                         BString $ nodeIdToBuf $ myNodeId)]
-onQuery addr (FindNode nodeId target)
+onQuery' (FindNode nodeId target)
     = do (myNodeId, _) <- nearestMyNode target
          nearest <- take 8 <$> nearestPeers target
          let nodes = encodeNodes $
@@ -172,7 +173,7 @@ onQuery addr (FindNode nodeId target)
                         BString $ nodeIdToBuf myNodeId),
                        (BString $ B8.pack "nodes",
                         BString nodes)]
-onQuery addr (GetPeers nodeId infoHash)
+onQuery' (GetPeers nodeId infoHash)
     = do (myNodeId, _) <- nearestMyNode infoHash
          return $ Right $
                 BDict [(BString $ B8.pack "id",
@@ -184,14 +185,19 @@ onQuery addr (GetPeers nodeId infoHash)
     where peerlist = map (BString . encodeAddr) peers
           peers = concat $ do port <- [85, 87]
                               return [SockAddrInet port 3414387287]
-onQuery addr (AnnouncePeer nodeId infoHash port token)
+onQuery' (AnnouncePeer nodeId infoHash port token)
     = do (myNodeId, _) <- nearestMyNode infoHash
          return $ Right $
                 BDict [(BString $ B8.pack "id",
                         BString $ nodeIdToBuf myNodeId)]
-onQuery addr _
+onQuery' _
     = return $ Left $
       Error 204 $ B8.pack "Method Unknown"
+
+onQuery addr q
+    = do logger <- ctxLogger <$> ask
+         liftIO $ logger q
+         onQuery' q
 
 -- Reply handling
 
@@ -314,7 +320,8 @@ runSpoofer port myNodeIds
          nodeRef <- newIORef node
          let ctx = AppContext { ctxState = appRef,
                                 ctxNode = nodeRef,
-                                ctxEvLoop = evLoop
+                                ctxEvLoop = evLoop,
+                                ctxLogger = log
                               }
              appCall :: App a -> IO a
              appCall f = runReaderT f ctx
