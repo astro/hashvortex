@@ -7,7 +7,6 @@ import Numeric (showHex, readHex)
 import Data.Bits
 import System.Random
 import Control.DeepSeq
-import Debug.Trace
 
 import IntBuf
 
@@ -44,6 +43,7 @@ distance :: NodeId -> NodeId -> Integer
 distance (NodeId a) (NodeId b)
     = bufToInteger $ W8.pack $ W8.zipWith xor a b
 
+(<->) :: NodeId -> NodeId -> Integer
 (<->) = distance
 
 distanceOrder :: NodeId -> NodeId -> Int
@@ -61,9 +61,9 @@ hexToNodeId s
                        W8.pack $
                        map hexToByte $
                        chunkify 2 s
-    where hexToByte s = let [(i, "")] = readHex s
-                        in i
-          chunkify size s
-              | length s < size = []
-              | otherwise = let (x, xs) = splitAt size s
+    where hexToByte s' = let [(i, "")] = readHex s'
+                         in i
+          chunkify size s'
+              | length s' < size = []
+              | otherwise = let (x, xs) = splitAt size s'
                             in x : chunkify size xs

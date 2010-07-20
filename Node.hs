@@ -7,11 +7,10 @@ import qualified Data.ByteString.Char8 as SB8
 import Network.Socket hiding (send, sendTo, recv, recvFrom)
 import Network.Socket.ByteString
 import Control.Concurrent.Chan
-import Data.Map (Map)
-import qualified Data.Map as Map
 import Control.Monad
 import Data.IORef
-import qualified System.Event as Ev
+import qualified Network.Libev as Ev
+import Data.Bits ((.&.))
 
 import InState
 import KRPC
@@ -20,28 +19,31 @@ import KRPC
 data NodeState = State { stSock :: Socket,
                          stQueryHandler :: QueryHandler,
                          stReplyHandler :: ReplyHandler,
-                         stLastT :: T,
-                         stQueries :: Map T (Packet -> IO ())
+                         stLastT :: T
                        }
 type Node = IORef NodeState
 type QueryHandler = SockAddr -> Query -> IO (Either Error Reply)
 type ReplyHandler = SockAddr -> Reply -> IO ()
 
 
-new :: Ev.EventManager -> Int -> IO Node
-new mgr port
+new :: Ev.EvLoopPtr -> Int -> IO Node
+new evLoop port
     = do sock <- socket AF_INET Datagram defaultProtocol
          bindSocket sock (SockAddrInet (fromIntegral port) 0)
          node <- newIORef State { stSock = sock,
                                   stQueryHandler = nullQueryHandler,
                                   stReplyHandler = nullReplyHandler,
-                                  stLastT = T B8.empty,
-                                  stQueries = Map.empty
+                                  stLastT = T B8.empty
                                 }
-         me <- myThreadId
-         let callback _key _ev = runOnce node
+         let callback evLoop evIo evType
+                 = when (evType .&. Ev.ev_read /= 0) $
+                   runOnce node
              fd = fromIntegral $ fdSocket sock
-         Ev.registerFd mgr callback fd Ev.evtRead
+
+         evIoCb <- Ev.mkIoCallback callback
+         evIo <- Ev.mkEvIo
+         Ev.evIoInit evIo evIoCb fd Ev.ev_read
+         Ev.evIoStart evLoop evIo
          return node
 
 nullQueryHandler _ _ = return $ Left $ Error 201 $ B8.pack "Not implemented"
@@ -58,7 +60,7 @@ run node = do runOnce node
 
 runOnce :: Node -> IO ()
 runOnce node = do sock <- stSock `liftM` readIORef node
-                  (buf, addr) <- recvFrom sock 65535
+                  (buf, addr) <- recvFrom sock 1024
                   let handle st = catch (handlePacket st buf addr) $ \e ->
                                   do putStrLn $ "Error handling packet: " ++ show e
                                      return st
@@ -70,24 +72,18 @@ handlePacket st buf addr
     = do let errorOrPkt = decodePacket buf
          case errorOrPkt of
            Right pkt ->
-               do let queries = stQueries st
-                  --putStrLn $ "Received " ++ show pkt ++ " from " ++ show addr
-                  let (isReply, isQuery, t) = case pkt of
-                                                RPacket t _ -> (True, False, t)
-                                                EPacket t _ -> (True, False, t)
-                                                QPacket t _ -> (False, True, t)
-                  case (isReply, isQuery) of
-                    (True, _) ->
-                        case Map.lookup t queries of
-                          Just receiver ->
-                              do receiver pkt
-                                 return st { stQueries = Map.delete t queries }
-                          Nothing -> case pkt of
-                                       RPacket _ reply ->
-                                           do catch (stReplyHandler st addr reply) print
-                                              return st
-                                       _ -> return st
-                    (False, True) ->
+               do --putStrLn $ "Received from " ++ show addr ++ ": " ++ show pkt
+                  let isQuery = case pkt of
+                                  (QPacket _ _) -> True
+                                  _ -> False
+                  case isQuery of
+                    False ->
+                        case pkt of
+                          RPacket _ reply ->
+                              do catch (stReplyHandler st addr reply) print
+                                 return st
+                          _ -> return st
+                    True ->
                         do let QPacket t qry = pkt
                            qRes <- stQueryHandler st addr qry
                            let pkt = case qRes of

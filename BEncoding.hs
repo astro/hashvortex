@@ -12,6 +12,7 @@ import Data.List (intercalate)
 import Control.DeepSeq
 import OpenSSL.Digest (MessageDigest(SHA1))
 import OpenSSL.Digest.ByteString.Lazy (digest)
+import Prelude hiding (getChar, takeWhile)
 
 
 data BValue = BInteger Integer

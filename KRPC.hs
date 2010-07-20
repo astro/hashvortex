@@ -82,6 +82,7 @@ decodePacket buf
                      do BList [BInteger eN, BString eS] <- pkt `bdictLookup` "e"
                         return $ Right $ EPacket (T t) $ Error eN eS
                  _ -> fail $ "Invalid packet type: " ++ show y
+        Right _ -> Left "Malformed packet"
         Left e -> Left $ "decode: " ++ e
 
 decodeQuery q a

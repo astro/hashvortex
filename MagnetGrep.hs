@@ -7,8 +7,10 @@ import Data.List (stripPrefix)
 import NodeId
 
 
+grep :: String -> IO [NodeId]
 grep url
-    = do let uri = fromMaybe undefined $
+    = do putStrLn $ "GET " ++ url
+         let uri = fromMaybe undefined $
                    parseURI url
              req = HTTP.mkRequest HTTP.GET uri
              req' = req { HTTP.rqHeaders = filter (\header ->
