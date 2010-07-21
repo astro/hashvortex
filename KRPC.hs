@@ -112,6 +112,7 @@ decodeQuery q a
                                  return port) <*>
                              (do BString token <- a `bdictLookup` "token"
                                  return token)
+           _ -> fail q
 
 encodePacket :: Packet -> B8.ByteString
 encodePacket (QPacket (T t) qry)
