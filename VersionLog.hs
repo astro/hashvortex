@@ -53,7 +53,7 @@ writer f stRef
                  "\"" ++ show version ++ "\": " ++ show amount
                ) (Map.toList $ stEvents st)
          writeIORef stRef $ st { stNow = stNow st + 1,
-                                 stEvents = resetEvents $ stEvents st 
+                                 stEvents = newEvents
                                }
 
 newEvents :: Events
@@ -65,7 +65,9 @@ resetEvents = Map.map $ const 0
 incEvent :: BValue -> Events -> Events
 incEvent pkt
     = let version = parseKRPCVersion pkt
-      in Map.alter (Just . maybe 1 (+ 1)) version
+          force r = r `seq` r
+      in force $
+         Map.alter (Just . maybe 1 (+ 1)) version
 
 setInterval :: Ev.EvLoopPtr -> Ev.EvTimestamp
             -> IO () -> IO ()
