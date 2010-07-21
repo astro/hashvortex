@@ -28,7 +28,8 @@ class NodeIdSource a where
 instance NodeIdSource W8.ByteString where
     makeNodeId = NodeId
 instance NodeIdSource LW8.ByteString where
-    makeNodeId = NodeId . W8.concat . LW8.toChunks
+    makeNodeId = fNodeId . W8.concat . LW8.toChunks
+        where fNodeId buf = buf `seq` NodeId buf
 
 makeRandomNodeId :: IO NodeId
 makeRandomNodeId = (NodeId .
@@ -40,8 +41,9 @@ makeRandomNodeId = (NodeId .
 makeRandomNeighbor :: NodeId -> IO NodeId
 makeRandomNeighbor (NodeId nodeIdBuf)
     = do gen <- newStdGen
-         return $ NodeId $
-                fuzz gen nodeIdBuf
+         let nodeIdBuf' = fuzz gen nodeIdBuf
+         nodeIdBuf' `seq`
+                    return $ NodeId nodeIdBuf'
     where fuzz :: RandomGen g => g
                -> W8.ByteString -> W8.ByteString
           fuzz g buf
@@ -56,7 +58,7 @@ makeRandomNeighbor (NodeId nodeIdBuf)
                      Nothing -> buf
                      Just (c, buf''') ->
                          let c' = f c
-                         in buf' `W8.append` (c' `W8.cons` buf''')
+                         in W8.concat [buf', W8.singleton c', buf''']
 
 nodeIdToBuf :: NodeId -> LW8.ByteString
 nodeIdToBuf (NodeId bs) = LW8.fromChunks [bs]

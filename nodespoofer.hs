@@ -79,7 +79,9 @@ appendPeer peer
     = do app <- getState
          let queue = stQueryQueue app
          when (Seq.length queue < queryQueueMax) $
-              putState $ app { stQueryQueue = queue |> peer }
+              let queue' = queue |> peer
+              in queue' `seq`
+                 putState $ app { stQueryQueue = queue' }
 
 popPeer :: App (Maybe Peer)
 popPeer

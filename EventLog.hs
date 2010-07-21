@@ -67,7 +67,8 @@ incEvent query
     = do st <- get
          let events = stEvents st
              events' = events // [(i, (events ! i) + 1)]
-         put $ st { stEvents = events' }
+         events' `seq`
+                 put $ st { stEvents = events' }
     where i = case query of
                 Ping _ -> 1
                 FindNode _ _ -> 2
