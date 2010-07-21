@@ -177,7 +177,7 @@ query = do mbPeer <- popPeer
                            Node.sendQueryNoWait addr q node
                     Just peer ->
                         do target <- makeRandomNeighbor $ peerNodeId peer
-                           target' <- makeRandomNeighbor $ peerNodeId peer
+                           target' <- makeRandomNodeId
                            let q = FindNode target target'
                            Node.sendQueryNoWait (peerAddr peer) q node
 
