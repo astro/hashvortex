@@ -323,7 +323,7 @@ makeTargets hostsPorts = BList <$> map (BString . encodeAddr) <$>
                               head <$> Node.getAddrs host port)
 
 runSpoofer port myNodeIds
-    = do log <- newLog 1.0 "spoofer.data"
+    = do log <- newLog 1.0 "trackerspoofer.data"
          evLoop <- Ev.evRecommendedBackends >>=
                    Ev.evDefaultLoop
          node <- Node.new evLoop 10000
@@ -335,7 +335,7 @@ runSpoofer port myNodeIds
                             }
          appRef <- newIORef app
          nodeRef <- newIORef node
-         targets <- makeTargets [("xxx", "80")]
+         targets <- makeTargets []
          let ctx = AppContext { ctxState = appRef,
                                 ctxNode = nodeRef,
                                 ctxTargets = targets,
@@ -350,9 +350,9 @@ runSpoofer port myNodeIds
          Node.setReplyHandler (appCallback onReply) node
 
          appCall $ do
-           setInterval 0.1 $ settler
-           setInterval 10 $ purger
-           setInterval 1 $ stats
+           setInterval 0.2 $ settler
+           setInterval 10.0 $ purger
+           setInterval 1.0 $ stats
 
          Ev.evLoop evLoop 0
 

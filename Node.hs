@@ -104,7 +104,7 @@ sendQueryNoWait addr qry
       do let t = tSucc $ stLastT st
              pkt = QPacket t qry
              buf = SB8.concat $ B8.toChunks $ encodePacket pkt
-         --putStrLn $ "Sending to " ++ show addr ++ ": " ++ show pkt
+         putStrLn $ "Sending to " ++ show addr ++ ": " ++ show pkt
          catch (sendTo (stSock st) buf addr >>
 	 	return ()
 	       ) $ \a -> return ()

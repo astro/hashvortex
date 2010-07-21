@@ -3,6 +3,7 @@ module NodeId where
 import Control.Monad
 import qualified Data.ByteString as W8
 import qualified Data.ByteString.Lazy as LW8
+import GHC.Word
 import Numeric (showHex, readHex)
 import Data.Bits
 import System.Random
@@ -35,6 +36,27 @@ makeRandomNodeId = (NodeId .
                     take 20 .
                     map fromInteger .
                     randomRs (0, 255)) `liftM` newStdGen
+
+makeRandomNeighbor :: NodeId -> IO NodeId
+makeRandomNeighbor (NodeId nodeIdBuf)
+    = do gen <- newStdGen
+         return $ NodeId $
+                fuzz gen nodeIdBuf
+    where fuzz :: RandomGen g => g
+               -> W8.ByteString -> W8.ByteString
+          fuzz g buf
+              = let (i, g') = randomR (10, 19) g
+                    (x, g'') = randomR (0, 255) g
+                in replace buf i (xor $ fromInteger x)
+          replace :: W8.ByteString -> Int
+                  -> (Word8 -> Word8) -> W8.ByteString
+          replace buf i f
+              = let (buf', buf'') = W8.splitAt i buf
+                in case W8.uncons buf'' of
+                     Nothing -> buf
+                     Just (c, buf''') ->
+                         let c' = f c
+                         in buf' `W8.append` (c' `W8.cons` buf''')
 
 nodeIdToBuf :: NodeId -> LW8.ByteString
 nodeIdToBuf (NodeId bs) = LW8.fromChunks [bs]
