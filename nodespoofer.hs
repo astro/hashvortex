@@ -179,9 +179,9 @@ makeTargets hostsPorts
       head <$> Node.getAddrs host port
 
 runSpoofer port
-    = do log <- newLog 1.0 "nodespoofer.data"
-         evLoop <- Ev.evRecommendedBackends >>=
+    = do evLoop <- Ev.evRecommendedBackends >>=
                    Ev.evDefaultLoop
+         log <- newLog evLoop "nodespoofer.data"
          node <- Node.new evLoop port
 
          let app = AppState { stQueryQueue = Seq.empty }
