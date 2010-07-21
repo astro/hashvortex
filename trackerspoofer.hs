@@ -326,7 +326,7 @@ runSpoofer port myNodeIds
     = do log <- newLog 1.0 "trackerspoofer.data"
          evLoop <- Ev.evRecommendedBackends >>=
                    Ev.evDefaultLoop
-         node <- Node.new evLoop 10000
+         node <- Node.new evLoop port
 
          let app = AppState { stMyNodes = Map.fromList $
                                           map (, ()) myNodeIds,
