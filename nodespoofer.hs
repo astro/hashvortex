@@ -79,13 +79,16 @@ appendPeer :: Peer -> App ()
 appendPeer peer
     = do app <- getState
          myPort <- ctxPort <$> ask
+         targets <- ctxTargets <$> ask
          let queue = stQueryQueue app
              portAllowed
                  = case peerAddr peer of
                      SockAddrInet peerPort _ -> peerPort /= myPort
                      _ -> False
+             isTarget = peerAddr peer `elem` targets
          when (Seq.length queue < queryQueueMax &&
-               portAllowed) $
+               portAllowed &&
+               not isTarget) $
               let queue' = queue |> peer
               in queue' `seq`
                  putState $ app { stQueryQueue = queue' }
