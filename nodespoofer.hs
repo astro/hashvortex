@@ -2,7 +2,7 @@
 module Main where
 
 import System.Environment
-import Network.Socket (SockAddr(SockAddrInet))
+import Network.Socket (SockAddr(SockAddrInet), PortNumber(PortNum))
 import Control.Monad
 import Control.Monad.Reader
 import Control.Applicative
@@ -33,7 +33,8 @@ data AppContext = AppContext { ctxState :: IORef AppState,
                                ctxNode :: IORef Node.Node,
                                ctxTargets :: [SockAddr],
                                ctxEvLoop :: Ev.EvLoopPtr,
-                               ctxLogger :: Logger
+                               ctxLogger :: Logger,
+                               ctxPort :: PortNumber
                              }
 type App a = ReaderT AppContext IO a
 
@@ -77,8 +78,14 @@ setInterval interval
 appendPeer :: Peer -> App ()
 appendPeer peer
     = do app <- getState
+         myPort <- ctxPort <$> ask
          let queue = stQueryQueue app
-         when (Seq.length queue < queryQueueMax) $
+             portAllowed
+                 = case peerAddr peer of
+                     SockAddrInet peerPort _ -> peerPort /= myPort
+                     _ -> False
+         when (Seq.length queue < queryQueueMax &&
+               portAllowed) $
               let queue' = queue |> peer
               in queue' `seq`
                  putState $ app { stQueryQueue = queue' }
@@ -192,7 +199,8 @@ runSpoofer port
                                 ctxNode = nodeRef,
                                 ctxTargets = targets,
                                 ctxEvLoop = evLoop,
-                                ctxLogger = log
+                                ctxLogger = log,
+                                ctxPort = PortNum $ fromIntegral port
                               }
              appCall :: App a -> IO a
              appCall f = runReaderT f ctx
