@@ -323,9 +323,9 @@ makeTargets hostsPorts = BList <$> map (BString . encodeAddr) <$>
                               head <$> Node.getAddrs host port)
 
 runSpoofer port myNodeIds
-    = do log <- newLog 1.0 "trackerspoofer.data"
-         evLoop <- Ev.evRecommendedBackends >>=
+    = do evLoop <- Ev.evRecommendedBackends >>=
                    Ev.evDefaultLoop
+         log <- newLog evLoop "trackerspoofer.data"
          node <- Node.new evLoop port
 
          let app = AppState { stMyNodes = Map.fromList $
