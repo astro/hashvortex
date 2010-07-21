@@ -95,12 +95,13 @@ popPeer
 
 token = B8.pack "a"
 
-onQuery' (Ping nodeId)
-    = do nodeId' <- liftIO $ makeRandomNeighbor nodeId
+onQuery' addr (Ping nodeId)
+    = do appendPeer $ Peer nodeId addr
+         nodeId' <- liftIO $ makeRandomNeighbor nodeId
          return $ Right $
                 BDict [(BString $ B8.pack "id",
                         BString $ nodeIdToBuf nodeId')]
-onQuery' (FindNode nodeId target)
+onQuery' addr (FindNode nodeId target)
     = do nodeId' <- liftIO $ makeRandomNeighbor nodeId
          targets <- ctxTargets <$> ask
          nodes <- encodeNodes <$>
@@ -113,7 +114,7 @@ onQuery' (FindNode nodeId target)
                         BString $ nodeIdToBuf nodeId'),
                        (BString $ B8.pack "nodes",
                         BString nodes)]
-onQuery' (GetPeers nodeId infoHash)
+onQuery' addr (GetPeers nodeId infoHash)
     = do nodeId' <- liftIO $ makeRandomNeighbor nodeId
          return $ Right $
                 BDict [(BString $ B8.pack "id",
@@ -122,19 +123,19 @@ onQuery' (GetPeers nodeId infoHash)
                         BString token),
                        (BString $ B8.pack "values",
                         BList [])]
-onQuery' (AnnouncePeer nodeId infoHash port token)
+onQuery' addr (AnnouncePeer nodeId infoHash port token)
     = do nodeId' <- liftIO $ makeRandomNeighbor nodeId
          return $ Right $
                 BDict [(BString $ B8.pack "id",
                         BString $ nodeIdToBuf nodeId')]
-onQuery' _
+onQuery' addr _
     = return $ Left $
       Error 204 $ B8.pack "Method Unknown"
 
 onQuery addr q
     = do logger <- ctxLogger <$> ask
          liftIO $ logger q
-         onQuery' q
+         onQuery' addr q
 
 -- Reply handling
 
