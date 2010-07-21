@@ -22,6 +22,7 @@ import qualified Node
 import KRPC
 import NodeId
 import EventLog
+import qualified VersionLog as VL
 import qualified MagnetGrep
 
 type MyNode = ()
@@ -41,7 +42,9 @@ data AppContext = AppContext { ctxState :: IORef AppState,
                                ctxNode :: IORef Node.Node,
                                ctxTargets :: BValue,
                                ctxEvLoop :: Ev.EvLoopPtr,
-                               ctxLogger :: Logger
+                               ctxLogger :: Logger,
+                               ctxQVLogger :: VL.Logger,
+                               ctxRVLogger :: VL.Logger
                              }
 type App a = ReaderT AppContext IO a
 
@@ -201,14 +204,18 @@ onQuery' _
     = return $ Left $
       Error 204 $ B8.pack "Method Unknown"
 
-onQuery addr q
+onQuery :: SockAddr -> BValue -> Query -> App (Either Error Reply)
+onQuery addr bvalue q
     = do logger <- ctxLogger <$> ask
          liftIO $ logger q
+         qvLogger <- ctxQVLogger <$> ask
+         liftIO $ qvLogger bvalue
          onQuery' q
 
 -- Reply handling
 
-onReply addr reply
+onReply :: SockAddr -> BValue -> Reply -> App ()
+onReply addr bvalue reply
     = do case reply `bdictLookup` "id" of
            Just (BString nodeIdBuf) ->
                do let nodeId = makeNodeId nodeIdBuf
@@ -224,6 +231,9 @@ onReply addr reply
                   return ()
            _ ->
                return ()
+
+         rvLogger <- ctxRVLogger <$> ask
+         liftIO $ rvLogger bvalue
 
 -- Settling
 
@@ -325,7 +335,9 @@ makeTargets hostsPorts = BList <$> map (BString . encodeAddr) <$>
 runSpoofer port myNodeIds
     = do evLoop <- Ev.evRecommendedBackends >>=
                    Ev.evDefaultLoop
-         log <- newLog evLoop "trackerspoofer.data"
+         logger <- newLog evLoop "trackerspoofer.data"
+         qvLogger <- VL.newLog evLoop "trackerspoofer-query-versions.log"
+         rvLogger <- VL.newLog evLoop "trackerspoofer-reply-versions.log"
          node <- Node.new evLoop port
 
          let app = AppState { stMyNodes = Map.fromList $
@@ -340,11 +352,13 @@ runSpoofer port myNodeIds
                                 ctxNode = nodeRef,
                                 ctxTargets = targets,
                                 ctxEvLoop = evLoop,
-                                ctxLogger = log
+                                ctxLogger = logger,
+                                ctxQVLogger = qvLogger,
+                                ctxRVLogger = rvLogger
                               }
              appCall :: App a -> IO a
              appCall f = runReaderT f ctx
-             appCallback f a q = appCall $ f a q
+             appCallback f a bv q = appCall $ f a bv q
 
          Node.setQueryHandler (appCallback onQuery) node
          Node.setReplyHandler (appCallback onReply) node

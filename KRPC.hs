@@ -63,11 +63,16 @@ instance NFData Error where
     rnf (Error i bs) = rnf i `seq`
                        rnf (B8.unpack bs)
 
-decodePacket :: SW8.ByteString -> Either String Packet
+decodePacket :: SW8.ByteString -> Either String (BValue, Packet)
 decodePacket buf
     = case decode buf of
         Right pkt@(BDict _) ->
-            fromMaybe (Left "Malformed packet") $
+            maybe (Left "Malformed packet")
+                  (\result ->
+                       case result of
+                         Left e -> Left e
+                         Right packet -> Right (pkt, packet)
+                  ) $
             do BString t <- pkt `bdictLookup` "t"
                BString y <- pkt `bdictLookup` "y"
                case B8.unpack y of

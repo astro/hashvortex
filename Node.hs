@@ -14,6 +14,7 @@ import Data.Bits ((.&.))
 
 import InState
 import KRPC
+import BEncoding (BValue)
 
 
 data NodeState = State { stSock :: Socket,
@@ -22,8 +23,8 @@ data NodeState = State { stSock :: Socket,
                          stLastT :: T
                        }
 type Node = IORef NodeState
-type QueryHandler = SockAddr -> Query -> IO (Either Error Reply)
-type ReplyHandler = SockAddr -> Reply -> IO ()
+type QueryHandler = SockAddr -> BValue -> Query -> IO (Either Error Reply)
+type ReplyHandler = SockAddr -> BValue -> Reply -> IO ()
 
 
 new :: Ev.EvLoopPtr -> Int -> IO Node
@@ -46,8 +47,10 @@ new evLoop port
          Ev.evIoStart evLoop evIo
          return node
 
-nullQueryHandler _ _ = return $ Left $ Error 201 $ B8.pack "Not implemented"
-nullReplyHandler _ _ = return ()
+nullQueryHandler _ _ _
+  = return $ Left $ Error 201 $ B8.pack "Not implemented"
+nullReplyHandler _ _ _ 
+  = return ()
 
 setQueryHandler :: QueryHandler -> Node -> IO ()
 setQueryHandler cb = inState $ \st -> st { stQueryHandler = cb }
@@ -71,7 +74,7 @@ handlePacket :: NodeState -> SB8.ByteString -> SockAddr -> IO NodeState
 handlePacket st buf addr
     = do let errorOrPkt = decodePacket buf
          case errorOrPkt of
-           Right pkt ->
+           Right (bval, pkt) ->
                do --putStrLn $ "Received from " ++ show addr ++ ": " ++ show pkt
                   let isQuery = case pkt of
                                   (QPacket _ _) -> True
@@ -80,17 +83,17 @@ handlePacket st buf addr
                     False ->
                         case pkt of
                           RPacket _ reply ->
-                              do catch (stReplyHandler st addr reply) print
+                              do catch (stReplyHandler st addr bval reply) print
                                  return st
                           _ -> return st
                     True ->
                         do let QPacket t qry = pkt
-                           qRes <- stQueryHandler st addr qry
+                           qRes <- stQueryHandler st addr bval qry
                            let pkt = case qRes of
                                        Left e -> EPacket t e
                                        Right r -> RPacket t r
                                buf = SB8.concat $ B8.toChunks $ encodePacket pkt
-                           --putStrLn $ "Replying " ++ show pkt ++ " to " ++ show addr
+                           putStrLn $ "Replying " ++ show pkt ++ " to " ++ show addr
                            catch (sendTo (stSock st) buf addr >>
                                   return ()
                                  ) $ \_ -> return ()
