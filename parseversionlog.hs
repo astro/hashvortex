@@ -23,7 +23,7 @@ findAllKeys :: [Map String String] -> [String]
 findAllKeys = ("time":) .
               filter (/= "time") .
               Set.toAscList .
-              Set.fromAscList .
+              Set.fromList .
               map fst .
               concatMap Map.toList
                    
@@ -46,6 +46,7 @@ main = do lines <- SC8.lines <$> SC8.getContents
                          objToMap
                        ) lines
           let keys = findAllKeys maps
+          putStrLn $ "# Keys: " ++ show keys
           
           writeData "data" keys maps
           
