@@ -14,14 +14,13 @@ import Data.Binary.Get
 import BEncoding
 
 data Version = Missing
-             | Version !ClientType !Word8 !Word8
+             | Version !ClientType !Word8
                deriving (Eq, Ord)
 instance Show Version where
     show Missing = "Missing"
-    show (Version clientType maj min)
+    show (Version clientType maj)
         = show clientType ++ "-" ++
-          show maj ++ "." ++
-          show min
+          show maj
 
 data ClientType = Unknown
                 | Ares
@@ -181,7 +180,7 @@ clientIdVersion clientId
 parseKRPCVersion pkt
     = case pkt `bdictLookup` "v" of
         Just (BString v)
-            | B8.length v >= 4 ->
+            | B8.length v >= 3 ->
                 runGet decoder v
         _ -> Missing
 
@@ -189,5 +188,4 @@ decoder :: Get Version
 decoder = do clientId <- getBytes 2
              let client = clientIdVersion clientId
              Version client <$>
-                     getWord8 <*>
                      getWord8
