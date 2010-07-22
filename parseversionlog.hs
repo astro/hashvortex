@@ -1,3 +1,4 @@
+{-# LANGUAGE TupleSections #-}
 module Main where
 
 import qualified Data.ByteString.Char8 as SC8
@@ -5,39 +6,48 @@ import Data.Object
 import qualified Data.Object.Json as JSON
 import Control.Applicative
 import qualified Data.Set as Set
+import Data.Map (Map)
+import qualified Data.Map as Map
 import Data.List (intercalate)
-import Control.Monad (forM)
+import Control.Monad (mapM)
 
 
-findAllKeys :: [Object String String] -> IO [String]
-findAllKeys objs = ("time":) <$>
-                   filter (/= "time") <$>
-                   Set.toAscList <$>
-                   Set.fromAscList <$>
-                   map fst <$> 
-                   concat <$> 
-                   mapM fromMapping objs
+objToMap :: Object String String -> IO (Map String String)
+objToMap obj = do objMapping <- fromMapping obj
+                  Map.fromList <$>
+                         mapM (\(k, v) ->
+                                (k, ) <$> fromScalar v
+                              ) objMapping
+
+findAllKeys :: [Map String String] -> [String]
+findAllKeys = ("time":) .
+              filter (/= "time") .
+              Set.toAscList .
+              Set.fromAscList .
+              map fst .
+              concatMap Map.toList
                    
-writeData :: String -> [String] -> [Object String String] -> IO ()
-writeData path keys objs
-  = unlines <$>
-    mapM (\obj ->
-           fromMapping obj >>= \mapping ->
-           return $
-           intercalate " " $
-           map (\key ->
-                 case lookupScalar key mapping of
-                   Nothing -> "0"
-                   Just val -> val
-               ) keys
-         ) objs >>=
-    writeFile path
+writeData :: String -> [String] -> [Map String String] -> IO ()
+writeData path keys
+  = writeFile path .
+    unlines .
+    map (\map' ->
+          intercalate " " $
+          map (\key ->
+                case Map.lookup key map' of
+                  Nothing -> "0"
+                  Just val -> val
+              ) keys
+        )
 
 main = do lines <- SC8.lines <$> SC8.getContents
-          objs <- mapM JSON.decode lines
-          keys <- findAllKeys objs
+          maps <- mapM (\line ->
+                         JSON.decode line >>= 
+                         objToMap
+                       ) lines
+          let keys = findAllKeys maps
           
-          writeData "data" keys objs
+          writeData "data" keys maps
           
           putStrLn "set xdata time"
           putStrLn "set timefmt \"%s\""
