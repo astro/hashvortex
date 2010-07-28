@@ -144,14 +144,14 @@ onQuery' addr _
     = return $ Left $
       Error 204 $ B8.pack "Method Unknown"
 
-onQuery addr q
+onQuery addr bvalue q
     = do logger <- ctxLogger <$> ask
          liftIO $ logger q
          onQuery' addr q
 
 -- Reply handling
 
-onReply addr reply
+onReply addr bvalue reply
     = case reply `bdictLookup` "nodes" of
         Just (BString nodesBuf) ->
             do let nodes = decodeNodes nodesBuf
@@ -207,7 +207,7 @@ runSpoofer port
                               }
              appCall :: App a -> IO a
              appCall f = runReaderT f ctx
-             appCallback f a q = appCall $ f a q
+             appCallback f a b q = appCall $ f a b q
 
          Node.setQueryHandler (appCallback onQuery) node
          Node.setReplyHandler (appCallback onReply) node
