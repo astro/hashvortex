@@ -301,12 +301,12 @@ purge = do now <- now
            app <- getState
            let peers = stPeers app
                keep peer
-                   = (peerLastSeen peer > now - 300) ||
+                   = (peerLastSeen peer > now - 30) ||
                      (case peerLastResponse peer of
-                        Just lastResponse -> lastResponse > now - 600
+                        Just lastResponse -> lastResponse > now - 60
                         Nothing -> False) ||
                      (case peerLastQuery peer of
-                        Just lastQuery -> lastQuery > now - 90
+                        Just lastQuery -> lastQuery > now - 20
                         Nothing -> False)
                peers' = Map.filter keep peers
            peers' `seq`
@@ -364,7 +364,7 @@ runSpoofer port myNodeIds
          Node.setReplyHandler (appCallback onReply) node
 
          appCall $ do
-           setInterval 0.2 $ settler
+           setInterval 0.05 $ settler
            setInterval 10.0 $ purger
            setInterval 1.0 $ stats
 

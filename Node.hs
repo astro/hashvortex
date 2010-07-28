@@ -93,7 +93,7 @@ handlePacket st buf addr
                                        Left e -> EPacket t e
                                        Right r -> RPacket t r
                                buf = SB8.concat $ B8.toChunks $ encodePacket pkt
-                           putStrLn $ "Replying " ++ show pkt ++ " to " ++ show addr
+                           --putStrLn $ "Replying " ++ show pkt ++ " to " ++ show addr
                            catch (sendTo (stSock st) buf addr >>
                                   return ()
                                  ) $ \_ -> return ()

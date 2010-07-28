@@ -213,7 +213,7 @@ runSpoofer port
          Node.setReplyHandler (appCallback onReply) node
 
          appCall $ do
-           setInterval 0.2 $ query
+           setInterval 0.05 $ query
 
          Ev.evLoop evLoop 0
 
