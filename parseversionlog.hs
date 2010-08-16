@@ -42,8 +42,9 @@ writeData path keys
 
 main = do lines <- SC8.lines <$> SC8.getContents
           maps <- mapM (\line ->
-                         JSON.decode line >>= 
-                         objToMap
+                         JSON.decode line >>= \m ->
+                         m `seq`
+                           objToMap m
                        ) lines
           let keys = findAllKeys maps
           putStrLn $ "# Keys: " ++ show keys
