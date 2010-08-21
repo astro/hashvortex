@@ -1,4 +1,4 @@
-{-# LANGUAGE TupleSections #-}
+{-# LANGUAGE TupleSections, ScopedTypeVariables #-}
 module Main where
 
 import qualified Data.ByteString.Char8 as SC8
@@ -10,6 +10,7 @@ import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.List (intercalate)
 import Control.Monad (mapM)
+import qualified Control.Exception as Exception
 
 
 objToMap :: Object String String -> IO (Map String String)
@@ -42,9 +43,10 @@ writeData path keys
 
 main = do lines <- SC8.lines <$> SC8.getContents
           maps <- mapM (\line ->
-                         JSON.decode line >>= \m ->
-                         m `seq`
-                           objToMap m
+                            Exception.catch (JSON.decode line >>= \m ->
+                                             m `seq` objToMap m)
+                                         (\(e :: Exception.SomeException) ->
+                                              return Map.empty)
                        ) lines
           let keys = findAllKeys maps
           putStrLn $ "# Keys: " ++ show keys
