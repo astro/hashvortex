@@ -32,13 +32,17 @@ writeData :: String -> [String] -> [Map String String] -> IO ()
 writeData path keys
   = writeFile path .
     unlines .
+    filter (/= "") .
     map (\map' ->
-          intercalate " " $
-          map (\key ->
-                case Map.lookup key map' of
-                  Nothing -> "0"
-                  Just val -> val
-              ) keys
+             case Map.member "time" map' of
+               False -> ""
+               True ->
+                   intercalate " " $
+                   map (\key ->
+                            case Map.lookup key map' of
+                              Nothing -> "0"
+                              Just val -> val
+                       ) keys
         )
 
 main = do lines <- SC8.lines <$> SC8.getContents
